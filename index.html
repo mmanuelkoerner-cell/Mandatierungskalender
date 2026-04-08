@@ -12,7 +12,6 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-
     const { useState, useMemo, useRef, useEffect } = React;
     const LS_KEY = 'mandatierungskalender_state';
 
@@ -130,80 +129,7 @@ const PRODUCT_COLORS = [
 ];
 
 // @@SAVED_STATE_START@@
-const SAVED_STATE = {
-  "products": [
-    {
-      "id": 2,
-      "name": "Dachmarke",
-      "mandDate": "2026-04-29",
-      "customDates": {
-        "review": "2026-07-29"
-      },
-      "status": {
-        "halbzeit": "erledigt",
-        "review": "geplant",
-        "vorbFrist": "angemeldet",
-        "vorb": "angemeldet",
-        "mandFrist": "angemeldet",
-        "mand": "angemeldet"
-      },
-      "color": "#0891b2"
-    },
-    {
-      "id": 3,
-      "name": "DRI",
-      "mandDate": "2026-11-11",
-      "customDates": {
-        "halbzeit": "2026-06-01"
-      },
-      "status": {
-        "halbzeit": "angemeldet",
-        "review": "geplant",
-        "vorbFrist": "geplant",
-        "vorb": "geplant",
-        "mandFrist": "geplant",
-        "mand": "geplant"
-      },
-      "color": "#db2777"
-    },
-    {
-      "id": 4,
-      "name": "Crime",
-      "mandDate": "2027-02-24",
-      "customDates": {},
-      "status": {
-        "halbzeit": "geplant",
-        "review": "geplant",
-        "vorbFrist": "geplant",
-        "vorb": "geplant",
-        "mandFrist": "geplant",
-        "mand": "geplant"
-      },
-      "color": "#ea580c"
-    }
-  ],
-  "blockers": [
-    "2026-03-30",
-    "2026-03-31",
-    "2026-04-01",
-    "2026-04-02",
-    "2026-04-03",
-    "2026-04-04",
-    "2026-04-05",
-    "2026-04-23",
-    "2026-04-24",
-    "2026-07-04",
-    "2026-07-05",
-    "2026-07-06",
-    "2026-07-07",
-    "2026-07-08",
-    "2026-07-09",
-    "2026-07-10",
-    "2026-07-11",
-    "2026-07-12"
-  ],
-  "hiddenProducts": []
-};
+const SAVED_STATE = null;
 // @@SAVED_STATE_END@@
 // Load order: 1) saved in file, 2) localStorage, 3) defaults
 const _ls = (()=>{ try { const v=localStorage.getItem(LS_KEY); return v?JSON.parse(v):null; } catch(e){return null;} })();
@@ -1034,9 +960,56 @@ function App() {
 }
 
 
+    const CORRECT_PW = "Mandatierung2026!";
+    const LS_PW_KEY  = "mandatierungskalender_auth";
+
+    function LoginScreen({ onSuccess }) {
+      const [pw, setPw] = React.useState("");
+      const [error, setError] = React.useState(false);
+      function submit() {
+        if (pw === CORRECT_PW) { onSuccess(); }
+        else { setError(true); setPw(""); setTimeout(()=>setError(false), 2000); }
+      }
+      return (
+        <div style={{minHeight:"100vh",background:"#0F172A",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',sans-serif"}}>
+          <div style={{background:"#1E293B",border:"1.5px solid #334155",borderRadius:14,padding:"48px 40px",width:340,boxShadow:"0 25px 60px rgba(0,0,0,.5)"}}>
+            <div style={{textAlign:"center",marginBottom:32}}>
+              <div style={{fontSize:36,marginBottom:12}}>📋</div>
+              <div style={{fontSize:20,fontWeight:800,color:"#F1F5F9",marginBottom:6}}>Mandatierungskalender</div>
+              <div style={{fontSize:13,color:"#64748B"}}>Portfoliomanagement · Partnerübersicht</div>
+            </div>
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:11,fontWeight:600,color:"#64748B",display:"block",marginBottom:8,textTransform:"uppercase",letterSpacing:".06em"}}>Passwort</label>
+              <input
+                type="password"
+                value={pw}
+                onChange={e=>setPw(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&submit()}
+                autoFocus
+                placeholder="Passwort eingeben"
+                style={{width:"100%",boxSizing:"border-box",padding:"10px 14px",background:"#0F172A",border:error?"1.5px solid #EF4444":"1.5px solid #334155",borderRadius:8,color:"#F1F5F9",fontSize:14,fontFamily:"'Inter',sans-serif",outline:"none",transition:"border-color .2s"}}
+              />
+              {error && <div style={{color:"#EF4444",fontSize:12,marginTop:6,fontWeight:500}}>Falsches Passwort. Bitte erneut versuchen.</div>}
+            </div>
+            <button
+              onClick={submit}
+              style={{width:"100%",padding:"11px",background:"#3B82F6",border:"none",borderRadius:8,color:"white",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",transition:"background .2s"}}
+              onMouseOver={e=>e.target.style.background="#2563EB"}
+              onMouseOut={e=>e.target.style.background="#3B82F6"}
+            >Anmelden</button>
+          </div>
+        </div>
+      );
+    }
+
+    function Root() {
+      const [auth, setAuth] = React.useState(()=>sessionStorage.getItem(LS_PW_KEY)==="1");
+      function unlock() { sessionStorage.setItem(LS_PW_KEY,"1"); setAuth(true); }
+      return auth ? <App /> : <LoginScreen onSuccess={unlock} />;
+    }
+
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  
+    root.render(<Root />);
   </script>
 </body>
 </html>

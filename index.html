@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mandatierungskalender</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>body{margin:0;padding:0}</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+
+    const { useState, useMemo, useRef, useEffect } = React;
+    const LS_KEY = 'mandatierungskalender_state';
+
+
+const MONTHS_FULL = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+const DAYS_DE = ["So","Mo","Di","Mi","Do","Fr","Sa"];
+
+function toISO(d) {
+  if (!d) return "";
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function fmt(d) {
+  if (!d) return "";
+  return `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+}
+function fmtShort(d) {
+  if (!d) return "";
+  return `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+function addDays(date,n) { const d=new Date(date); d.setDate(d.getDate()+n); return d; }
+function addMonths(date,n) { const d=new Date(date); d.setMonth(d.getMonth()+n); return d; }
+function prevFriday(date) { const d=new Date(date); d.setDate(d.getDate()-1); while(d.getDay()!==5) d.setDate(d.getDate()-1); return d; }
+function snapToNextWed(str) {
+  if (!str) return "";
+  const d=new Date(str); while(d.getDay()!==3) d.setDate(d.getDate()+1); return toISO(d);
+}
+function parseISO(str) {
+  if (!str) return null;
+  const [y,m,d]=str.split("-").map(Number); return new Date(y,m-1,d);
+}
+function getISOWeek(date) {
+  const d=new Date(date); d.setHours(0,0,0,0);
+  d.setDate(d.getDate()+3-(d.getDay()+6)%7);
+  const w1=new Date(d.getFullYear(),0,4);
+  return 1+Math.round(((d-w1)/86400000-3+(w1.getDay()+6)%7)/7);
+}
+function makeAbbr(name) {
+  const w=name.trim().split(/\s+/);
+  return (w.length===1?w[0].slice(0,4):w.map(x=>x[0]).join("").slice(0,4)).toUpperCase();
+}
+function daysUntil(date) {
+  const today=new Date(); today.setHours(0,0,0,0);
+  const d=new Date(date); d.setHours(0,0,0,0);
+  return Math.ceil((d-today)/86400000);
+}
+
+// ── Cycle calculation ─────────────────────────────────────────────
+function calcOneCycle(mandDateStr) {
+  if (!mandDateStr) return null;
+  const mand=new Date(mandDateStr);
+  const vorb=addDays(mand,-8);
+  const vorbFrist=prevFriday(vorb);
+  const mandFrist=prevFriday(mand);
+  const review=addDays(mand,-14);
+  const halbzeit=addMonths(mand,-6);
+  return { halbzeit, review, vorbFrist, vorb, mandFrist, mand };
+}
+
+function nextCycleMand(mandDateStr) {
+  const d=new Date(mandDateStr);
+  d.setFullYear(d.getFullYear()+1);
+  while(d.getDay()!==3) d.setDate(d.getDate()+1);
+  return toISO(d);
+}
+
+// Returns array of cycle objects: { cycleIndex, dates }
+function getAllCycles(product, numCycles=3) {
+  const cycles=[];
+  let mandDate=product.mandDate;
+  for (let i=0; i<numCycles; i++) {
+    const base=calcOneCycle(mandDate);
+    if (!base) break;
+    const dates={};
+    for (const key of Object.keys(base)) {
+      dates[key]=(i===0&&product.customDates?.[key])?parseISO(product.customDates[key]):base[key];
+    }
+    cycles.push({ cycleIndex:i, mandDate, dates,
+      status: i===0 ? product.status : {...BASE_STATUS} });
+    mandDate=nextCycleMand(mandDate);
+  }
+  return cycles;
+}
+
+function getEffectiveDates(mandDate, customDates) {
+  const base=calcOneCycle(mandDate);
+  if (!base) return null;
+  const r={};
+  for (const k of Object.keys(base)) r[k]=(customDates?.[k])?parseISO(customDates[k]):base[k];
+  return r;
+}
+
+// ── Constants ─────────────────────────────────────────────────────
+const EVENT_KEYS = ["halbzeit","review","vorbFrist","vorb","mandFrist","mand"];
+
+const EVENT_TYPES = {
+  halbzeit:  { label:"Halbzeitreview",     calLabel:"Halbzeitreview", color:"#8b5cf6", bg:"#ede9fe", short:"HZ" },
+  review:    { label:"Review",             calLabel:"Review",         color:"#3b82f6", bg:"#dbeafe", short:"R"  },
+  vorbFrist: { label:"Frist Vorbereitung", calLabel:"Frist VB",       color:"#f97316", bg:"#ffedd5", short:"FV" },
+  vorb:      { label:"Vorbereitung",       calLabel:"VB",             color:"#eab308", bg:"#fef9c3", short:"V"  },
+  mandFrist: { label:"Frist Mandatierung", calLabel:"Frist MD",       color:"#ef4444", bg:"#fee2e2", short:"FM" },
+  mand:      { label:"Mandatierung",       calLabel:"Mandatierung",   color:"#16a34a", bg:"#dcfce7", short:"M"  },
+};
+
+const BASE_STATUS = { halbzeit:"geplant",review:"geplant",vorbFrist:"geplant",vorb:"geplant",mandFrist:"geplant",mand:"geplant" };
+
+const STATUS_CONFIG = {
+  geplant:    { label:"Geplant",    color:"#9ca3af", bg:"#f3f4f6" },
+  angemeldet: { label:"Terminiert", color:"#d97706", bg:"#fef3c7" },
+  erledigt:   { label:"Erledigt",   color:"#16a34a", bg:"#dcfce7" },
+};
+
+const PRODUCT_COLORS = [
+  "#7c3aed","#0891b2","#db2777","#ea580c","#65a30d",
+  "#0284c7","#9333ea","#d97706","#dc2626","#0f766e",
+];
+
+// @@SAVED_STATE_START@@
+const SAVED_STATE = {
+  "products": [
+    {
+      "id": 2,
+      "name": "Dachmarke",
+      "mandDate": "2026-04-29",
+      "customDates": {
+        "review": "2026-07-29"
+      },
+      "status": {
+        "halbzeit": "erledigt",
+        "review": "geplant",
+        "vorbFrist": "angemeldet",
+        "vorb": "angemeldet",
+        "mandFrist": "angemeldet",
+        "mand": "angemeldet"
+      },
+      "color": "#0891b2"
+    },
+    {
+      "id": 3,
+      "name": "DRI",
+      "mandDate": "2026-11-11",
+      "customDates": {
+        "halbzeit": "2026-06-01"
+      },
+      "status": {
+        "halbzeit": "angemeldet",
+        "review": "geplant",
+        "vorbFrist": "geplant",
+        "vorb": "geplant",
+        "mandFrist": "geplant",
+        "mand": "geplant"
+      },
+      "color": "#db2777"
+    },
+    {
+      "id": 4,
+      "name": "Crime",
+      "mandDate": "2027-02-24",
+      "customDates": {},
+      "status": {
+        "halbzeit": "geplant",
+        "review": "geplant",
+        "vorbFrist": "geplant",
+        "vorb": "geplant",
+        "mandFrist": "geplant",
+        "mand": "geplant"
+      },
+      "color": "#ea580c"
+    }
+  ],
+  "blockers": [
+    "2026-03-30",
+    "2026-03-31",
+    "2026-04-01",
+    "2026-04-02",
+    "2026-04-03",
+    "2026-04-04",
+    "2026-04-05",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-07-04",
+    "2026-07-05",
+    "2026-07-06",
+    "2026-07-07",
+    "2026-07-08",
+    "2026-07-09",
+    "2026-07-10",
+    "2026-07-11",
+    "2026-07-12"
+  ],
+  "hiddenProducts": []
+};
+// @@SAVED_STATE_END@@
+// Load order: 1) saved in file, 2) localStorage, 3) defaults
+const _ls = (()=>{ try { const v=localStorage.getItem(LS_KEY); return v?JSON.parse(v):null; } catch(e){return null;} })();
+const _src = SAVED_STATE || _ls;
+const INITIAL_PRODUCTS = _src ? _src.products : [
+  { id:1, name:"F2000",     mandDate:"2026-05-27", customDates:{}, status:{...BASE_STATUS}, color:"#7c3aed" },
+  { id:2, name:"Dachmarke", mandDate:"2026-04-29", customDates:{}, status:{...BASE_STATUS}, color:"#0891b2" },
+  { id:3, name:"DRI",       mandDate:"2026-11-11", customDates:{}, status:{...BASE_STATUS}, color:"#db2777" },
+  { id:4, name:"Crime",     mandDate:"2027-02-24", customDates:{}, status:{...BASE_STATUS}, color:"#ea580c" },
+];
+const INITIAL_BLOCKERS    = _src ? new Set(_src.blockers) : new Set();
+const INITIAL_HIDDEN      = _src ? new Set(_src.hiddenProducts) : new Set();
+
+const ZOOM_LEVELS = [0.6, 0.75, 0.9, 1.0, 1.2, 1.5, 1.8];
+const ZOOM_LABELS  = ["60%","75%","90%","100%","120%","150%","180%"];
+
+function App() {
+  const [products, setProducts]             = useState(INITIAL_PRODUCTS);
+  const [selected, setSelected]             = useState(null);
+  const [showForm, setShowForm]             = useState(false);
+  const [editId, setEditId]                 = useState(null);
+  const [form, setForm]                     = useState({ name:"", mandDate:"", color:PRODUCT_COLORS[0] });
+  const [activeView, setActiveView]         = useState("calendar");
+  const [tooltip, setTooltip]               = useState(null);
+  const [confirmDelete, setConfirmDelete]   = useState(null);
+  const [hiddenProducts, setHiddenProducts] = useState(new Set());
+  const [blockers, setBlockers]             = useState(INITIAL_BLOCKERS);
+  const [blockerMode, setBlockerMode]       = useState(false);
+  const [zoomIdx, setZoomIdx]               = useState(3);
+  const [calYear, setCalYear]               = useState(2026);
+
+  const [confirmDrop, setConfirmDrop] = useState(null); // { pid, key, iso }
+  const blockerDragStart = useRef(null);
+  const [blockerDragCurrent, setBlockerDragCurrent] = useState(null);
+  const dragging  = useRef(null);
+  const [dragOver, setDragOver] = useState(null);
+
+  const zoom        = ZOOM_LEVELS[zoomIdx];
+  const headerLineH = Math.round(18 * zoom);
+  const evtRowH     = Math.round(20 * zoom);
+  const metaFont    = Math.round(9  * zoom);
+  const labelFont   = Math.round(9  * zoom);
+  const abbrFont    = Math.round(8  * zoom);
+  const colW        = Math.round(36 * zoom);
+
+
+  // ── Auto-save to localStorage ────────────────────────────────────
+  useEffect(() => {
+    try {
+      const state = {
+        products,
+        blockers: Array.from(blockers),
+        hiddenProducts: Array.from(hiddenProducts),
+      };
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+    } catch(e) {}
+  }, [products, blockers, hiddenProducts]);
+
+  // ── Warn before closing if unsaved ──────────────────────────────
+  const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify({
+    products: INITIAL_PRODUCTS,
+    blockers: Array.from(INITIAL_BLOCKERS),
+    hiddenProducts: Array.from(INITIAL_HIDDEN),
+  }));
+  const isDirty = JSON.stringify({ products, blockers: Array.from(blockers), hiddenProducts: Array.from(hiddenProducts) }) !== savedSnapshot;
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
+
+  // ── Helpers ──────────────────────────────────────────────────────
+  const nextId = () => Math.max(0,...products.map(p=>p.id))+1;
+
+  function saveProduct() {
+    if (!form.name||!form.mandDate) return;
+    const mandDate=snapToNextWed(form.mandDate);
+    if (editId) {
+      setProducts(ps=>ps.map(p=>p.id===editId?{...p,name:form.name,mandDate,color:form.color}:p));
+    } else {
+      setProducts(ps=>[...ps,{id:nextId(),name:form.name,mandDate,color:form.color,customDates:{},status:{...BASE_STATUS}}]);
+    }
+    setShowForm(false); setEditId(null); setForm({name:"",mandDate:"",color:PRODUCT_COLORS[0]});
+  }
+
+  // ── Save to file ─────────────────────────────────────────────────
+  function saveToFile() {
+    const state = {
+      products: products,
+      blockers: Array.from(blockers),
+      hiddenProducts: Array.from(hiddenProducts),
+    };
+    const stateJson = JSON.stringify(state, null, 2);
+    const newBlock =
+      "// @@SAVED_STATE_START@@\nconst SAVED_STATE = " + stateJson + ";\n// @@SAVED_STATE_END@@";
+
+    // Read ORIGINAL source from the babel script tag (never modified by React)
+    const babelEl = document.querySelector('script[type="text/babel"]');
+    const originalSource = babelEl.textContent;
+    const newSource = originalSource.replace(
+      /\/\/ @@SAVED_STATE_START@@[\s\S]*?\/\/ @@SAVED_STATE_END@@/,
+      newBlock
+    );
+
+    // Rebuild clean HTML from scratch
+    const newHtml = [
+      '<!DOCTYPE html>',
+      '<html lang="de">',
+      '<head>',
+      '  <meta charset="UTF-8" />',
+      '  <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+      '  <title>Mandatierungskalender</title>',
+      '  <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>',
+      '  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>',
+      '  <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>',
+      '  <style>body{margin:0;padding:0}<\/style>',
+      '</head>',
+      '<body>',
+      '  <div id="root"></div>',
+      '  <script type="text/babel">',
+      newSource,
+      '  <\/script>',
+      '</body>',
+      '</html>'
+    ].join('\n');
+
+    const blob = new Blob([newHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "Mandatierungskalender.html";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    // Mark as clean after file save
+    setSavedSnapshot(JSON.stringify({ products, blockers: Array.from(blockers), hiddenProducts: Array.from(hiddenProducts) }));
+  }
+
+  function doDelete() {
+    const id=confirmDelete; setProducts(ps=>ps.filter(p=>p.id!==id));
+    if(selected===id)setSelected(null); setConfirmDelete(null);
+  }
+  function editProduct(p) { setForm({name:p.name,mandDate:p.mandDate,color:p.color}); setEditId(p.id); setShowForm(true); }
+  function updateStatus(pid,key,st) { setProducts(ps=>ps.map(p=>p.id===pid?{...p,status:{...p.status,[key]:st}}:p)); }
+  function updateEventDate(pid,key,iso) { setProducts(ps=>ps.map(p=>p.id===pid?{...p,customDates:{...p.customDates,[key]:iso}}:p)); }
+  function resetEventDate(pid,key) {
+    setProducts(ps=>ps.map(p=>{if(p.id!==pid)return p;const cd={...p.customDates};delete cd[key];return{...p,customDates:cd};}));
+  }
+  function toggleProduct(id) { setHiddenProducts(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;}); }
+
+  // blocker drag
+  function isoRange(a,b) {
+    const da=parseISO(a),db=parseISO(b);
+    const [s,e]=da<=db?[da,db]:[db,da]; const keys=[]; const c=new Date(s);
+    while(c<=e){keys.push(toISO(c));c.setDate(c.getDate()+1);}return keys;
+  }
+  function onCellMouseDown(ev,iso) { if(!blockerMode)return; ev.preventDefault(); blockerDragStart.current=iso; setBlockerDragCurrent(iso); }
+  function onCellMouseEnter(iso) { if(!blockerMode||!blockerDragStart.current)return; setBlockerDragCurrent(iso); }
+  function onCellMouseUp(iso) {
+    if(!blockerMode||!blockerDragStart.current)return;
+    const range=isoRange(blockerDragStart.current,iso);
+    const all=range.every(k=>blockers.has(k));
+    setBlockers(prev=>{const n=new Set(prev);if(all)range.forEach(k=>n.delete(k));else range.forEach(k=>n.add(k));return n;});
+    blockerDragStart.current=null; setBlockerDragCurrent(null);
+  }
+  function isDraggedBlocker(iso) {
+    if(!blockerDragStart.current||!blockerDragCurrent)return false;
+    return isoRange(blockerDragStart.current,blockerDragCurrent).includes(iso);
+  }
+
+  // event DnD
+  function onDragStart(ev,pid,key) { if(blockerMode)return; dragging.current={pid,key}; ev.dataTransfer.effectAllowed="move"; }
+  function onDragOver(ev,mi,day) {
+    if(blockerMode)return; const dim=new Date(calYear,mi+1,0).getDate();
+    if(day>dim||!dragging.current)return; ev.preventDefault(); setDragOver({mi,day});
+  }
+  function onDrop(ev,mi,day) {
+    ev.preventDefault(); setDragOver(null); if(!dragging.current)return;
+    const{pid,key}=dragging.current;
+    const iso=`${calYear}-${String(mi+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+    const p=products.find(x=>x.id===pid);
+    setConfirmDrop({pid,key,iso,productName:p?.name||"",eventLabel:EVENT_TYPES[key]?.label||key});
+    dragging.current=null;
+  }
+  function doConfirmDrop() {
+    if(!confirmDrop)return;
+    updateEventDate(confirmDrop.pid,confirmDrop.key,confirmDrop.iso);
+    setConfirmDrop(null);
+  }
+  function onDragEnd() { dragging.current=null; setDragOver(null); }
+
+  // ── Computed ─────────────────────────────────────────────────────
+  const productDates=useMemo(()=>products.map(p=>({...p,dates:getEffectiveDates(p.mandDate,p.customDates)})),[products]);
+  const selectedProduct=productDates.find(p=>p.id===selected);
+
+  // All cycle events across years (for calendar grid)
+  const allCycleEvents=useMemo(()=>{
+    const list=[];
+    products.forEach(p=>{
+      if(hiddenProducts.has(p.id))return;
+      getAllCycles(p,4).forEach(cycle=>{
+        EVENT_KEYS.forEach(key=>{
+          const date=cycle.dates[key]; if(!date)return;
+          list.push({productId:p.id,productName:p.name,productColor:p.color,abbr:makeAbbr(p.name),
+            key,date,status:cycle.status[key]??'geplant',cycleIndex:cycle.cycleIndex});
+        });
+      });
+    });
+    return list;
+  },[products,hiddenProducts]);
+
+  const eventsByMonthDay=useMemo(()=>{
+    const map={};
+    allCycleEvents.forEach(e=>{
+      if(e.date.getFullYear()!==calYear)return;
+      const k=`${e.date.getMonth()}-${e.date.getDate()}`;
+      if(!map[k])map[k]=[];
+      map[k].push(e);
+    });
+    return map;
+  },[allCycleEvents,calYear]);
+
+  // Flat sorted events for timeline (all years)
+  const allEventsSorted=useMemo(()=>{
+    const list=[];
+    products.forEach(p=>{
+      if(!p) return;
+      if(hiddenProducts.has(p.id)) return;
+      getAllCycles(p,4).forEach(cycle=>{
+        EVENT_KEYS.forEach(key=>{
+          const date=cycle.dates[key]; if(!date)return;
+          list.push({productId:p.id,productName:p.name,productColor:p.color,key,date,status:cycle.status[key]??'geplant'});
+        });
+      });
+    });
+    return list.sort((a,b)=>a.date-b.date);
+  },[products,hiddenProducts]);
+
+  // Upcoming (future from today)
+  const upcomingEvents=useMemo(()=>{
+    const today=new Date(); today.setHours(0,0,0,0);
+    return allEventsSorted.filter(e=>e.date>=today).slice(0,12);
+  },[allEventsSorted]);
+
+  // Events by (year, month) for timeline
+  function eventsForYearMonth(productObj, year, mi) {
+    const cycles=getAllCycles(productObj,4);
+    const results=[];
+    cycles.forEach(cycle=>{
+      EVENT_KEYS.forEach(key=>{
+        const date=cycle.dates[key];
+        if(date&&date.getFullYear()===year&&date.getMonth()===mi)
+          results.push({key,date,status:cycle.status[key]??'geplant'});
+      });
+    });
+    return results;
+  }
+
+  const previewDates=form.mandDate?calcOneCycle(snapToNextWed(form.mandDate)):null;
+  const isWed=form.mandDate&&parseISO(form.mandDate)?.getDay()===3;
+
+  // ── RENDER ───────────────────────────────────────────────────────
+  return (
+    <div
+      style={{minHeight:"100vh",background:"#f1f5f9",color:"#1e293b",fontFamily:"'Inter',system-ui,sans-serif",userSelect:"none"}}
+      onMouseUp={()=>{if(blockerDragStart.current){setBlockerDragCurrent(null);blockerDragStart.current=null;}}}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+        *{box-sizing:border-box}
+        ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:#f1f5f9}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
+        .tab-btn{background:none;border:none;cursor:pointer;padding:9px 18px;font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#94a3b8;border-bottom:2px solid transparent;transition:all .15s}
+        .tab-btn.active{color:#1e293b;border-bottom-color:#3b82f6}.tab-btn:hover{color:#475569}
+        .add-btn{background:#3b82f6;border:none;color:white;padding:7px 16px;border-radius:7px;cursor:pointer;font-size:12px;font-family:'Inter',sans-serif;font-weight:600;transition:all .2s;box-shadow:0 1px 3px rgba(59,130,246,.3)}
+        .add-btn:hover{background:#2563eb}.add-btn:disabled{background:#cbd5e1;cursor:not-allowed;box-shadow:none}
+        .del-btn{background:none;border:none;cursor:pointer;color:#94a3b8;font-size:14px;padding:2px 5px;border-radius:4px;transition:all .15s}
+        .del-btn:hover{color:#ef4444;background:#fee2e2}
+        .edit-btn{background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:2px 5px;border-radius:4px;transition:all .15s}
+        .edit-btn:hover{color:#3b82f6;background:#dbeafe}
+        input{background:white;border:1.5px solid #e2e8f0;color:#1e293b;padding:8px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;outline:none;transition:border .15s;width:100%}
+        input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+        .status-pill{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;cursor:pointer;border:1.5px solid;transition:all .15s;white-space:nowrap;font-family:'Inter',sans-serif}
+        .overlay{position:fixed;inset:0;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
+        .modal{background:white;border-radius:14px;padding:28px;min-width:400px;max-width:520px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,.15);max-height:90vh;overflow-y:auto}
+        .confirm-modal{background:white;border-radius:12px;padding:24px;width:320px;box-shadow:0 24px 60px rgba(0,0,0,.2)}
+        .tooltip{position:fixed;background:#1e293b;color:white;padding:10px 13px;border-radius:9px;font-size:11px;z-index:999;pointer-events:none;max-width:260px;box-shadow:0 8px 24px rgba(0,0,0,.25);line-height:1.6}
+        .vis-toggle{display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:6px;cursor:pointer;border:1.5px solid #e2e8f0;background:white;transition:all .15s;font-size:11px;font-weight:600;font-family:'Inter',sans-serif;width:100%}
+        .vis-toggle:hover{border-color:#94a3b8}.vis-toggle.hidden{opacity:.5;background:#f8fafc}
+        .date-input-row{display:flex;align-items:center;gap:6px}
+        .date-input-row input{padding:5px 8px;font-size:12px;font-family:'JetBrains Mono',monospace;border-radius:5px;width:130px;flex-shrink:0}
+        .reset-btn{background:none;border:none;cursor:pointer;color:#94a3b8;font-size:11px;padding:2px 6px;border-radius:4px;transition:all .15s;white-space:nowrap}
+        .reset-btn:hover{color:#3b82f6;background:#dbeafe}
+        .zoom-btn{background:white;border:1.5px solid #e2e8f0;color:#475569;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0}
+        .zoom-btn:hover{border-color:#3b82f6;color:#3b82f6;background:#eff6ff}.zoom-btn:disabled{opacity:.3;cursor:not-allowed}
+        .year-btn{padding:5px 14px;border-radius:7px;font-size:13px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;border:2px solid;transition:all .15s}
+        .year-btn.active{background:#1e293b;border-color:#1e293b;color:white}
+        .year-btn.inactive{background:white;border-color:#e2e8f0;color:#64748b}.year-btn.inactive:hover{border-color:#94a3b8}
+        .evt-row{display:flex;align-items:center;width:100%;border-radius:3px;cursor:grab;transition:opacity .15s;overflow:hidden;gap:0;flex-shrink:0}
+        .evt-row:active{cursor:grabbing;opacity:.7}.evt-row:hover{filter:brightness(.93)}
+        .cal-col{flex:1;min-width:0;overflow:hidden}
+      `}</style>
+
+      {/* HEADER */}
+      <div style={{background:"white",borderBottom:"1.5px solid #e2e8f0",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:38,height:38,borderRadius:10,background:"linear-gradient(135deg,#3b82f6,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,boxShadow:"0 2px 8px rgba(99,102,241,.35)"}}>📋</div>
+          <div>
+            <div style={{fontWeight:700,fontSize:17,letterSpacing:"-.4px",color:"#0f172a"}}>Mandatierungskalender <span style={{color:"#3b82f6"}}>{calYear}</span></div>
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:1}}>Portfoliomanagement · Partnerübersicht</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <button onClick={saveToFile} style={{display:"flex",alignItems:"center",gap:6,background:isDirty?"#f0fdf4":"white",border:isDirty?"2px solid #22c55e":"2px solid #d1fae5",color:isDirty?"#16a34a":"#86efac",padding:"7px 14px",borderRadius:7,cursor:"pointer",fontSize:12,fontFamily:"'Inter',sans-serif",fontWeight:700,boxShadow:isDirty?"0 1px 3px rgba(34,197,94,.2)":"none",transition:"all .3s"}}>
+            {isDirty ? "💾 Speichern*" : "✓ Gespeichert"}
+          </button>
+          <button className="add-btn" onClick={()=>{setEditId(null);setForm({name:"",mandDate:"",color:PRODUCT_COLORS[products.length%PRODUCT_COLORS.length]});setShowForm(true);}}>+ Produkt hinzufügen</button>
+        </div>
+      </div>
+
+      {/* TABS */}
+      <div style={{background:"white",borderBottom:"1.5px solid #e2e8f0",paddingLeft:24,display:"flex",alignItems:"center"}}>
+        {[["calendar","📅  Jahreskalender"],["timeline","→  Zeitstrahl"],["detail","☰  Detailansicht"]].map(([v,l])=>(
+          <button key={v} className={`tab-btn${activeView===v?" active":""}`} onClick={()=>setActiveView(v)}>{l}</button>
+        ))}
+      </div>
+
+      <div style={{padding:"16px 20px",display:"flex",gap:14,alignItems:"flex-start"}}>
+
+        {/* SIDEBAR */}
+        <div style={{width:224,flexShrink:0,display:"flex",flexDirection:"column",gap:10}}>
+
+          {/* Products */}
+          <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"14px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:".07em",textTransform:"uppercase"}}>Produkte</div>
+              {activeView==="calendar"&&products.length>0&&(
+                <div style={{display:"flex",gap:8}}>
+                  <button style={{fontSize:10,color:"#3b82f6",background:"none",border:"none",cursor:"pointer",fontWeight:600,padding:0}} onClick={()=>setHiddenProducts(new Set())}>Alle ein</button>
+                  <span style={{color:"#cbd5e1"}}>·</span>
+                  <button style={{fontSize:10,color:"#94a3b8",background:"none",border:"none",cursor:"pointer",fontWeight:600,padding:0}} onClick={()=>setHiddenProducts(new Set(products.map(p=>p.id)))}>Alle aus</button>
+                </div>
+              )}
+            </div>
+            {productDates.map(p=>{
+              const hidden=hiddenProducts.has(p.id);
+              return (
+                <div key={p.id} style={{marginBottom:5}}>
+                  {activeView==="calendar"&&(
+                    <button className={`vis-toggle${hidden?" hidden":""}`} onClick={()=>toggleProduct(p.id)} style={{marginBottom:2}}>
+                      <span style={{fontSize:12}}>{hidden?"🙈":"👁"}</span>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:hidden?"#cbd5e1":p.color,flexShrink:0}} />
+                      <span style={{flex:1,textAlign:"left",color:hidden?"#94a3b8":"#334155",textDecoration:hidden?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</span>
+                      <span style={{fontSize:9,color:hidden?"#9ca3af":"#22c55e",fontWeight:700}}>{hidden?"AUS":"EIN"}</span>
+                    </button>
+                  )}
+                  <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 8px",borderRadius:7,background:selected===p.id?"#eff6ff":"transparent",border:selected===p.id?"1.5px solid #bfdbfe":"1.5px solid transparent"}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:p.color,flexShrink:0}} />
+                    <span style={{flex:1,fontSize:12,fontWeight:500,color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"pointer"}}
+                      onClick={()=>{setSelected(p.id===selected?null:p.id);setActiveView("detail");}}>
+                      {p.name} <span style={{color:"#94a3b8",fontSize:10}}>({makeAbbr(p.name)})</span>
+                    </span>
+                    <button className="edit-btn" onClick={()=>editProduct(p)}>✎</button>
+                    <button className="del-btn" onClick={()=>setConfirmDelete(p.id)}>✕</button>
+                  </div>
+                </div>
+              );
+            })}
+            {products.length===0&&<div style={{color:"#cbd5e1",fontSize:11,padding:"4px"}}>Keine Produkte.</div>}
+          </div>
+
+          {/* Legend */}
+          <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"14px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:".07em",textTransform:"uppercase",marginBottom:10}}>Terminarten</div>
+            {Object.entries(EVENT_TYPES).map(([k,v])=>(
+              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                <div style={{width:24,height:15,borderRadius:4,background:v.bg,border:`1.5px solid ${v.color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:v.color,flexShrink:0}}>{v.short}</div>
+                <span style={{fontSize:11,color:"#475569"}}>{v.label}</span>
+              </div>
+            ))}
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6,paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
+              <div style={{width:24,height:15,borderRadius:4,background:"repeating-linear-gradient(45deg,#cbd5e1,#cbd5e1 2px,#f1f5f9 2px,#f1f5f9 6px)",border:"1.5px solid #64748b",flexShrink:0}} />
+              <span style={{fontSize:11,color:"#475569"}}>Blocker</span>
+            </div>
+            <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #f1f5f9"}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:".07em",textTransform:"uppercase",marginBottom:8}}>Status</div>
+              {Object.entries(STATUS_CONFIG).map(([k,v])=>(
+                <div key={k} style={{display:"flex",alignItems:"center",gap:7,marginBottom:5}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:v.color,flexShrink:0}} />
+                  <span style={{fontSize:11,color:"#475569"}}>{v.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Upcoming */}
+          <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"14px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:".07em",textTransform:"uppercase",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span>Nächste Termine</span>
+              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:600,color:"#3b82f6",background:"#eff6ff",padding:"1px 7px",borderRadius:5,textTransform:"none",letterSpacing:0}}>{fmt(new Date())}</span>
+            </div>
+            {upcomingEvents.map((e,i)=>{
+              const du=daysUntil(e.date);
+              const duColor=du<=3?"#ef4444":du<=7?"#f97316":du<=14?"#eab308":"#94a3b8";
+              return (
+                <div key={i} style={{display:"flex",gap:6,alignItems:"flex-start",marginBottom:7,paddingBottom:7,borderBottom:i<upcomingEvents.length-1?"1px solid #f8fafc":"none"}}>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"#94a3b8",width:30,flexShrink:0,paddingTop:1}}>{fmtShort(e.date)}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:1}}>
+                      <div style={{width:5,height:5,borderRadius:"50%",background:e.productColor,flexShrink:0}} />
+                      <span style={{fontSize:11,fontWeight:600,color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.productName}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:4}}>
+                      <div style={{fontSize:10,color:EVENT_TYPES[e.key].color,fontWeight:500}}>{EVENT_TYPES[e.key].label}</div>
+                      <div style={{fontSize:10,fontWeight:700,color:duColor,flexShrink:0,fontFamily:"'JetBrains Mono',monospace"}}>
+                        {du===0?"Heute":du===1?"Morgen":`${du}d`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {upcomingEvents.length===0&&<div style={{color:"#cbd5e1",fontSize:11}}>Keine Termine.</div>}
+          </div>
+        </div>
+
+        {/* MAIN */}
+        <div style={{flex:1,minWidth:0}}>
+
+          {/* ════════════════ CALENDAR ════════════════ */}
+          {activeView==="calendar"&&(
+            <div>
+              {/* Toolbar */}
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+                <div style={{display:"flex",alignItems:"center",gap:4,background:"white",border:"1.5px solid #e2e8f0",borderRadius:8,padding:"4px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                  {[2026,2027].map(y=>(
+                    <button key={y} className={`year-btn ${calYear===y?"active":"inactive"}`} onClick={()=>setCalYear(y)}>{y}</button>
+                  ))}
+                </div>
+                <button style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"'Inter',sans-serif",transition:"all .2s",border:"2px solid",
+                  borderColor:blockerMode?"#475569":"#e2e8f0",background:blockerMode?"#f1f5f9":"white",color:blockerMode?"#1e293b":"#64748b"}}
+                  onClick={()=>setBlockerMode(m=>!m)}>
+                  🚫 {blockerMode?"Blocker-Modus AN":"Blocker setzen"}
+                </button>
+                {blockers.size>0&&(
+                  <button style={{fontSize:11,color:"#64748b",background:"#f1f5f9",border:"1.5px solid #cbd5e1",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontWeight:600,fontFamily:"'Inter',sans-serif"}}
+                    onClick={()=>setBlockers(new Set())}>
+                    🗑 Blocker löschen ({blockers.size})
+                  </button>
+                )}
+                <div style={{flex:1}} />
+                <div style={{display:"flex",alignItems:"center",gap:6,background:"white",border:"1.5px solid #e2e8f0",borderRadius:8,padding:"4px 8px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                  <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Zoom</span>
+                  <button className="zoom-btn" disabled={zoomIdx<=0} onClick={()=>setZoomIdx(i=>Math.max(0,i-1))}>−</button>
+                  <span style={{fontSize:12,fontWeight:700,color:"#3b82f6",minWidth:36,textAlign:"center",fontFamily:"'JetBrains Mono',monospace"}}>{ZOOM_LABELS[zoomIdx]}</span>
+                  <button className="zoom-btn" disabled={zoomIdx>=ZOOM_LEVELS.length-1} onClick={()=>setZoomIdx(i=>Math.min(ZOOM_LEVELS.length-1,i+1))}>+</button>
+                </div>
+              </div>
+
+              {/* Grid */}
+              <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,boxShadow:"0 1px 3px rgba(0,0,0,.04)",overflow:"auto",cursor:blockerMode?"crosshair":"default"}}>
+
+                {/* Month header */}
+                <div style={{display:"flex",alignItems:"stretch",borderBottom:"2px solid #e2e8f0",position:"sticky",top:0,zIndex:10,background:"#f8fafc"}}>
+                  <div style={{width:colW,flexShrink:0,background:"#f8fafc",borderRight:"2px solid #e2e8f0",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{fontSize:Math.round(8*zoom),fontWeight:700,color:"#94a3b8",writingMode:"vertical-rl",transform:"rotate(180deg)"}}>TAG</span>
+                  </div>
+                  {MONTHS_FULL.map((m,i)=>(
+                    <div key={i} className="cal-col" style={{textAlign:"center",padding:`${Math.round(5*zoom)}px 2px`,fontWeight:700,borderRight:i<11?"1px solid #e2e8f0":"none",lineHeight:1.3}}>
+                      <div style={{fontSize:Math.round(13*zoom),fontWeight:800,color:"#3b82f6"}}>{i+1}</div>
+                      <div style={{fontSize:Math.round(10*zoom),color:"#64748b"}}>{m.slice(0,3)}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Day rows */}
+                {Array.from({length:31},(_,di)=>{
+                  const day=di+1;
+                  const maxEvts=MONTHS_FULL.reduce((mx,_,mi)=>{
+                    const dim=new Date(calYear,mi+1,0).getDate();
+                    if(day>dim)return mx;
+                    return Math.max(mx,(eventsByMonthDay[`${mi}-${day}`]||[]).length);
+                  },0);
+                  const rowH=headerLineH+maxEvts*evtRowH+Math.round(4*zoom);
+
+                  return (
+                    <div key={day} style={{display:"flex",alignItems:"stretch",borderBottom:day<31?"1px solid #e8edf2":"none",minHeight:rowH}}>
+                      {/* Day col */}
+                      <div style={{width:colW,flexShrink:0,background:"#f8fafc",borderRight:"2px solid #e2e8f0",display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:Math.round(4*zoom)}}>
+                        <span style={{fontSize:metaFont,fontWeight:700,color:"#111827",fontFamily:"'JetBrains Mono',monospace",lineHeight:1}}>{day}</span>
+                      </div>
+
+                      {/* Month cells */}
+                      {MONTHS_FULL.map((_,mi)=>{
+                        const dim=new Date(calYear,mi+1,0).getDate();
+                        if(day>dim) return <div key={mi} className="cal-col" style={{borderRight:mi<11?"1px solid #eef1f5":"none",background:"#f9fafb",minHeight:rowH}} />;
+
+                        const dateObj=new Date(calYear,mi,day);
+                        const dow=dateObj.getDay();
+                        const isWeekend=dow===0||dow===6;
+                        const isMon=dow===1;
+                        const iso=`${calYear}-${String(mi+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+                        const evts=eventsByMonthDay[`${mi}-${day}`]||[];
+                        const hasEvt=evts.length>0;
+                        const isBlocker=blockers.has(iso);
+                        const isDragged=isDraggedBlocker(iso);
+                        const isDrop=dragOver&&dragOver.mi===mi&&dragOver.day===day;
+                        const kw=isMon?getISOWeek(dateObj):null;
+                        const todayISO=toISO(new Date());
+                        const isToday=iso===todayISO;
+
+                        let bg="white";
+                        if(isDrop) bg="#e0f2fe";
+                        else if(isToday) bg="#eff6ff";
+                        else if(isBlocker) bg="#f8fafc";
+                        else if(hasEvt) bg="#f7f9ff";
+                        else if(isWeekend) bg="#f0f2f5";
+
+                        return (
+                          <div key={mi} className="cal-col"
+                            style={{borderRight:mi<11?"1px solid #eef1f5":"none",padding:`${Math.round(3*zoom)}px ${Math.round(3*zoom)}px`,background:bg,
+                              outline:isDrop?"2px dashed #3b82f6":isToday?"2px solid #3b82f6":(isBlocker||isDragged)?"2px solid #64748b44":"none",outlineOffset:"-2px",
+                              cursor:blockerMode?"crosshair":"default",position:"relative",minHeight:rowH}}
+                            onMouseDown={ev=>onCellMouseDown(ev,iso)}
+                            onMouseEnter={()=>onCellMouseEnter(iso)}
+                            onMouseUp={()=>onCellMouseUp(iso)}
+                            onDragOver={ev=>onDragOver(ev,mi,day)}
+                            onDragLeave={()=>setDragOver(null)}
+                            onDrop={ev=>onDrop(ev,mi,day)}
+                          >
+                            {/* Blocker overlay */}
+                            {(isBlocker||isDragged)&&(
+                              <div style={{position:"absolute",inset:0,background:"repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 2px,#f8fafc 2px,#f8fafc 6px)",opacity:.7,pointerEvents:"none",zIndex:0}} />
+                            )}
+
+                            {/* Header: day number + KW + dow */}
+                            <div style={{display:"flex",alignItems:"center",gap:Math.round(2*zoom),marginBottom:Math.round(2*zoom),position:"relative",zIndex:1}}>
+                              <span style={{fontSize:metaFont,fontWeight:700,color:isToday?"#1d4ed8":"#111827",fontFamily:"'JetBrains Mono',monospace",lineHeight:1,flexShrink:0,
+                                ...(isToday?{background:"#3b82f6",color:"white",borderRadius:"50%",width:Math.round(15*zoom),height:Math.round(15*zoom),display:"flex",alignItems:"center",justifyContent:"center"}:{})}}>{day}</span>
+                              {isMon&&<span style={{fontSize:Math.round(8*zoom),fontWeight:600,color:"#3b82f6",lineHeight:1,flexShrink:0}}>KW{kw}</span>}
+                              <span style={{fontSize:metaFont,fontWeight:isWeekend?400:700,color:isWeekend?"#cbd5e1":isToday?"#3b82f6":"#111827",lineHeight:1,marginLeft:"auto",flexShrink:0}}>{DAYS_DE[dow].slice(0,2)}</span>
+                            </div>
+
+                            {/* Event rows */}
+                            <div style={{display:"flex",flexDirection:"column",gap:Math.round(2*zoom),position:"relative",zIndex:1}}>
+                              {evts.map((e,i)=>{
+                                const cfg=EVENT_TYPES[e.key];
+                                const sc=STATUS_CONFIG[e.status]||STATUS_CONFIG.geplant;
+                                return (
+                                  <div key={i} className="evt-row"
+                                    draggable={!blockerMode}
+                                    onDragStart={ev=>onDragStart(ev,e.productId,e.key)}
+                                    onDragEnd={onDragEnd}
+                                    onClick={ev=>{ev.stopPropagation();if(!blockerMode){setSelected(e.productId);setActiveView("detail");}}}
+                                    onMouseEnter={ev=>{const r=ev.currentTarget.getBoundingClientRect();setTooltip({x:r.left+r.width/2,y:r.bottom+4,evts:[e]});}}
+                                    onMouseLeave={()=>setTooltip(null)}
+                                    style={{height:evtRowH,background:cfg.bg,border:`1.5px solid ${cfg.color}44`,borderLeft:`3px solid ${cfg.color}`}}
+                                  >
+                                    <div style={{flex:1,minWidth:0,paddingLeft:Math.round(4*zoom),display:"flex",alignItems:"center",overflow:"hidden"}}>
+                                      <span style={{fontSize:labelFont,fontWeight:700,color:cfg.color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1}}>
+                                        {cfg.calLabel}
+                                      </span>
+                                    </div>
+                                    <div style={{flexShrink:0,paddingRight:Math.round(4*zoom),paddingLeft:Math.round(3*zoom),display:"flex",alignItems:"center",gap:Math.round(3*zoom)}}>
+                                      <div style={{width:Math.round(5*zoom),height:Math.round(5*zoom),borderRadius:"50%",background:sc.color,flexShrink:0}} />
+                                      <div style={{background:e.productColor,color:"white",fontSize:abbrFont,fontWeight:700,padding:`0 ${Math.round(4*zoom)}px`,borderRadius:Math.round(3*zoom),lineHeight:`${evtRowH-Math.round(6*zoom)}px`,whiteSpace:"nowrap",flexShrink:0}}>
+                                        {e.abbr}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Blocker label at larger zoom */}
+                            {isBlocker&&zoom>=1.2&&(
+                              <div style={{position:"relative",zIndex:1,marginTop:Math.round(2*zoom),fontSize:Math.round(8*zoom),color:"#64748b",fontWeight:700,textAlign:"center"}}>Blocker</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ════════════════ TIMELINE ════════════════ */}
+          {activeView==="timeline"&&(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {[2026,2027].map(yr=>(
+                <div key={yr} style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"18px",overflow:"auto",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"#3b82f6",marginBottom:14,letterSpacing:"-.3px"}}>{yr}</div>
+                  <div style={{display:"flex",marginBottom:4}}>
+                    <div style={{width:140,flexShrink:0}} />
+                    {MONTHS_FULL.map((m,i)=>(
+                      <div key={i} style={{flex:1,textAlign:"center",fontSize:10,color:"#94a3b8",fontWeight:700,paddingBottom:4,borderBottom:"1.5px solid #f1f5f9",lineHeight:1.3}}>
+                        <div style={{fontSize:11,color:"#3b82f6",fontWeight:800}}>{i+1}</div>
+                        <div>{m.slice(0,3)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {products.map(p=>{
+                    const hidden=hiddenProducts.has(p.id);
+                    return (
+                    <div key={p.id} style={{display:"flex",alignItems:"center",borderBottom:"1px solid #f8fafc",padding:"5px 0",opacity:hidden?0.3:1}}>
+                      <div style={{width:140,flexShrink:0,display:"flex",alignItems:"center",gap:5}}>
+                        <button onClick={()=>toggleProduct(p.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:11,padding:"0 2px",lineHeight:1,flexShrink:0,color:hidden?"#cbd5e1":"#64748b"}} title={hidden?"Einblenden":"Ausblenden"}>{hidden?"🙈":"👁"}</button>
+                        <div style={{width:8,height:8,borderRadius:"50%",background:p.color,flexShrink:0}} />
+                        <span style={{fontSize:12,fontWeight:600,color:hidden?"#94a3b8":"#334155",textDecoration:hidden?"line-through":"none"}}>{p.name}</span>
+                      </div>
+                      {MONTHS_FULL.map((_,mi)=>{
+                        const monthEvts=eventsForYearMonth(p,yr,mi);
+                        return (
+                          <div key={mi} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:1,minHeight:28,flexWrap:"wrap"}}>
+                            {monthEvts.map((e,i)=>(
+                              <div key={i} title={`${EVENT_TYPES[e.key].label}: ${fmt(e.date)}`}
+                                style={{width:22,height:17,borderRadius:3,background:EVENT_TYPES[e.key].bg,border:`1.5px solid ${EVENT_TYPES[e.key].color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:EVENT_TYPES[e.key].color,position:"relative",cursor:"default"}}>
+                                {EVENT_TYPES[e.key].short}
+                                <div style={{position:"absolute",top:-3,right:-3,width:5,height:5,borderRadius:"50%",background:STATUS_CONFIG[e.status]?.color||"#9ca3af",border:"1px solid white"}} />
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );})}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ════════════════ DETAIL ════════════════ */}
+          {activeView==="detail"&&(
+            !selectedProduct?(
+              <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"60px",textAlign:"center",color:"#cbd5e1",fontWeight:500,boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                Wähle ein Produkt aus der linken Liste.
+              </div>
+            ):(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"20px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,paddingBottom:14,borderBottom:"1.5px solid #f1f5f9"}}>
+                    <div style={{width:10,height:10,borderRadius:"50%",background:selectedProduct.color}} />
+                    <span style={{fontWeight:700,fontSize:16,color:"#0f172a"}}>{selectedProduct.name}</span>
+                    <span style={{fontSize:11,fontWeight:700,color:"white",background:selectedProduct.color,padding:"1px 7px",borderRadius:5,marginLeft:2}}>{makeAbbr(selectedProduct.name)}</span>
+                    <span style={{fontSize:11,color:"#94a3b8",fontFamily:"'JetBrains Mono',monospace",marginLeft:"auto"}}>Mand. {fmt(selectedProduct.dates?.mand)}</span>
+                  </div>
+                  {selectedProduct.dates&&Object.entries(EVENT_TYPES).map(([key,cfg])=>{
+                    const date=selectedProduct.dates[key]; if(!date)return null;
+                    const status=selectedProduct.status[key];
+                    const scfg=STATUS_CONFIG[status]||STATUS_CONFIG.geplant;
+                    const isCustom=!!(selectedProduct.customDates?.[key]);
+                    return (
+                      <div key={key} style={{padding:"11px 12px",borderRadius:9,marginBottom:8,background:cfg.bg,border:`1.5px solid ${cfg.color}33`}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                          <div style={{width:32,height:32,borderRadius:8,background:"white",border:`1.5px solid ${cfg.color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:cfg.color,flexShrink:0}}>{cfg.short}</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:11,color:"#64748b",marginBottom:1}}>{cfg.label}</div>
+                            {isCustom&&<span style={{fontSize:9,color:"#d97706",fontWeight:600,background:"#fef9c3",padding:"1px 5px",borderRadius:3}}>Manuell</span>}
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                            {Object.entries(STATUS_CONFIG).map(([sk,sv])=>(
+                              <button key={sk} className="status-pill"
+                                style={{borderColor:status===sk?sv.color:"#e2e8f0",background:status===sk?sv.bg:"white",color:status===sk?sv.color:"#94a3b8"}}
+                                onClick={()=>updateStatus(selectedProduct.id,key,sk)}>{sv.label}</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="date-input-row">
+                          <input type="date" value={toISO(date)} onChange={e=>updateEventDate(selectedProduct.id,key,e.target.value)} style={{borderColor:`${cfg.color}66`}} />
+                          <span style={{fontSize:10,color:"#94a3b8",flexShrink:0,fontFamily:"'JetBrains Mono',monospace"}}>{DAYS_DE[date.getDay()]} KW{getISOWeek(date)}</span>
+                          {isCustom&&<button className="reset-btn" onClick={()=>resetEventDate(selectedProduct.id,key)}>↺ Reset</button>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"20px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:".07em",textTransform:"uppercase",marginBottom:18}}>Prozessschritte</div>
+                  {selectedProduct.dates&&[
+                    {key:"halbzeit",  label:"Halbzeitreview",                 note:"Halbjährliche Zwischenbilanz"},
+                    {key:"review",    label:"Review erstellen & präsentieren", note:"Qualitative & quantitative Zielerreichung"},
+                    {key:"vorbFrist", label:"Dokumente einreichen",            note:"Frist: Freitag 12:00 · Kalkulation + Vorschlag"},
+                    {key:"vorb",      label:"Vorbereitungstermin",             note:"Dienstags · Kalkulation prüfen"},
+                    {key:"mandFrist", label:"Dokumente einreichen",            note:"Frist: Freitag 12:00 · Finale Unterlagen"},
+                    {key:"mand",      label:"Mandatierungsrunde",              note:"Mittwochs · Budget-Entscheid"},
+                  ].map((step,i,arr)=>{
+                    const date=selectedProduct.dates[step.key]; if(!date)return null;
+                    const cfg=EVENT_TYPES[step.key];
+                    const scfg=STATUS_CONFIG[selectedProduct.status[step.key]]||STATUS_CONFIG.geplant;
+                    return (
+                      <div key={step.key} style={{display:"flex",gap:14}}>
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+                          <div style={{width:32,height:32,borderRadius:"50%",background:cfg.bg,border:`2px solid ${cfg.color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:cfg.color,flexShrink:0}}>{cfg.short}</div>
+                          {i<arr.length-1&&<div style={{width:2,height:22,background:"#f1f5f9",margin:"2px 0"}} />}
+                        </div>
+                        <div style={{paddingBottom:i<arr.length-1?6:0,paddingTop:4}}>
+                          <div style={{fontSize:12,fontWeight:600,color:"#1e293b",marginBottom:1}}>{step.label}</div>
+                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:5}}>{step.note}</div>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:13,fontFamily:"'JetBrains Mono',monospace",fontWeight:500,color:cfg.color}}>{DAYS_DE[date.getDay()]} {fmt(date)}</span>
+                            <span style={{padding:"1px 8px",borderRadius:20,fontSize:9,fontWeight:600,background:scfg.bg,color:scfg.color,border:`1px solid ${scfg.color}44`}}>{scfg.label}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )
+          )}
+        </div>
+      </div>
+
+      {/* TOOLTIP */}
+      {tooltip&&(
+        <div className="tooltip" style={{left:tooltip.x,top:tooltip.y,transform:"translateX(-50%)"}}>
+          {tooltip.evts.map((e,i)=>(
+            <div key={i} style={{marginBottom:i<tooltip.evts.length-1?8:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2}}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:e.productColor,flexShrink:0}} />
+                <span style={{fontWeight:600,color:"#f1f5f9"}}>{e.productName}</span>
+              </div>
+              <div style={{paddingLeft:11,color:EVENT_TYPES[e.key].color}}>{EVENT_TYPES[e.key].label}</div>
+              <div style={{paddingLeft:11,color:"#94a3b8"}}>{DAYS_DE[e.date.getDay()]} {fmt(e.date)} · {STATUS_CONFIG[e.status]?.label||"Geplant"}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* CONFIRM DELETE */}
+      {confirmDelete!==null&&(
+        <div className="overlay" onClick={()=>setConfirmDelete(null)}>
+          <div className="confirm-modal" onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:22,marginBottom:10}}>🗑️</div>
+            <div style={{fontWeight:700,fontSize:15,color:"#0f172a",marginBottom:6}}>Produkt löschen?</div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:22}}>
+              <strong style={{color:"#1e293b"}}>{products.find(p=>p.id===confirmDelete)?.name}</strong> und alle Termine werden unwiderruflich gelöscht.
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button style={{background:"white",border:"1.5px solid #e2e8f0",color:"#64748b",padding:"8px 18px",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:500,fontFamily:"'Inter',sans-serif"}} onClick={()=>setConfirmDelete(null)}>Abbrechen</button>
+              <button style={{background:"#ef4444",border:"none",color:"white",padding:"8px 18px",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"'Inter',sans-serif"}} onClick={doDelete}>Ja, löschen</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* CONFIRM DROP */}
+      {confirmDrop!==null&&(
+        <div className="overlay" onClick={()=>setConfirmDrop(null)}>
+          <div className="confirm-modal" onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:22,marginBottom:10}}>📅</div>
+            <div style={{fontWeight:700,fontSize:15,color:"#0f172a",marginBottom:6}}>Termin verschieben?</div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:8}}>
+              <strong style={{color:"#1e293b"}}>{confirmDrop.productName}</strong>
+            </div>
+            <div style={{fontSize:12,color:"#475569",marginBottom:6}}>
+              <span style={{display:"inline-block",padding:"2px 8px",borderRadius:5,background:EVENT_TYPES[confirmDrop.key]?.bg,color:EVENT_TYPES[confirmDrop.key]?.color,fontWeight:700,marginRight:6}}>{EVENT_TYPES[confirmDrop.key]?.short}</span>
+              {EVENT_TYPES[confirmDrop.key]?.label}
+            </div>
+            <div style={{fontSize:12,color:"#475569",marginBottom:22}}>
+              Neues Datum: <strong style={{color:"#1e293b",fontFamily:"'JetBrains Mono',monospace"}}>{(() => { const d=parseISO(confirmDrop.iso); return d?`${DAYS_DE[d.getDay()]} ${fmt(d)}`:""; })()}</strong>
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button style={{background:"white",border:"1.5px solid #e2e8f0",color:"#64748b",padding:"8px 18px",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:500,fontFamily:"'Inter',sans-serif"}} onClick={()=>setConfirmDrop(null)}>Abbrechen</button>
+              <button style={{background:"#3b82f6",border:"none",color:"white",padding:"8px 18px",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"'Inter',sans-serif"}} onClick={doConfirmDrop}>Ja, verschieben</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD/EDIT MODAL */}
+      {showForm&&(
+        <div className="overlay" onClick={()=>setShowForm(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div style={{fontWeight:700,fontSize:16,marginBottom:20,color:"#0f172a"}}>{editId?"Produkt bearbeiten":"Neues Produkt"}</div>
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:11,fontWeight:600,color:"#64748b",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:".05em"}}>Produktname</label>
+              <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="z.B. Sport Extra" />
+              {form.name&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>Kürzel: <strong style={{color:"#1e293b"}}>{makeAbbr(form.name)}</strong></div>}
+            </div>
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:11,fontWeight:600,color:"#64748b",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:".05em"}}>
+                Mandatierungstermin {(!isWed&&form.mandDate)?"→ nächsten Mittwoch":"(Mittwochs)"}
+              </label>
+              <input type="date" value={form.mandDate} onChange={e=>setForm(f=>({...f,mandDate:e.target.value}))} />
+              {form.mandDate&&!isWed&&<div style={{color:"#d97706",fontSize:11,marginTop:5,background:"#fef9c3",padding:"5px 8px",borderRadius:6}}>⚠ Wird auf <strong>{fmt(parseISO(snapToNextWed(form.mandDate)))}</strong> gesetzt</div>}
+            </div>
+            {previewDates&&(
+              <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:9,padding:"13px",marginBottom:18}}>
+                <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>Automatisch berechnet</div>
+                {[["Halbzeitreview",previewDates.halbzeit,"halbzeit"],["Review",previewDates.review,"review"],["Frist Vorbereitung",previewDates.vorbFrist,"vorbFrist"],["Vorbereitung",previewDates.vorb,"vorb"],["Frist Mandatierung",previewDates.mandFrist,"mandFrist"],["Mandatierungstermin",previewDates.mand,"mand"]].map(([label,date,key])=>(
+                  <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+                    <div style={{display:"flex",alignItems:"center",gap:7}}>
+                      <div style={{width:20,height:13,borderRadius:3,background:EVENT_TYPES[key].bg,border:`1px solid ${EVENT_TYPES[key].color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:EVENT_TYPES[key].color}}>{EVENT_TYPES[key].short}</div>
+                      <span style={{fontSize:11,color:"#64748b"}}>{label}</span>
+                    </div>
+                    <span style={{color:EVENT_TYPES[key].color,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:500}}>{DAYS_DE[date.getDay()]} {fmt(date)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{marginBottom:22}}>
+              <label style={{fontSize:11,fontWeight:600,color:"#64748b",display:"block",marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>Farbe</label>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {PRODUCT_COLORS.map(c=>(
+                  <div key={c} onClick={()=>setForm(f=>({...f,color:c}))} style={{width:26,height:26,borderRadius:7,background:c,cursor:"pointer",outline:form.color===c?`3px solid ${c}`:"3px solid transparent",outlineOffset:"2px",transform:form.color===c?"scale(1.15)":"scale(1)",transition:"all .15s"}} />
+                ))}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button style={{background:"white",border:"1.5px solid #e2e8f0",color:"#64748b",padding:"8px 18px",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:500,fontFamily:"'Inter',sans-serif"}} onClick={()=>setShowForm(false)}>Abbrechen</button>
+              <button className="add-btn" style={{fontSize:13,padding:"8px 20px"}} onClick={saveProduct} disabled={!form.name||!form.mandDate}>{editId?"Speichern":"Hinzufügen"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  
+  </script>
+</body>
+</html>

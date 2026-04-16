@@ -12,6 +12,7 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
+
     const { useState, useMemo, useRef, useEffect } = React;
     const LS_KEY = 'mandatierungskalender_state';
 
@@ -129,7 +130,92 @@ const PRODUCT_COLORS = [
 ];
 
 // @@SAVED_STATE_START@@
-const SAVED_STATE = null;
+const SAVED_STATE = {
+  "products": [
+    {
+      "id": 2,
+      "name": "Dachmarke",
+      "mandDate": "2026-04-29",
+      "customDates": {
+        "review": "2026-07-29"
+      },
+      "status": {
+        "halbzeit": "erledigt",
+        "review": "geplant",
+        "vorbFrist": "angemeldet",
+        "vorb": "angemeldet",
+        "mandFrist": "angemeldet",
+        "mand": "angemeldet"
+      },
+      "color": "#0891b2"
+    },
+    {
+      "id": 3,
+      "name": "DRI",
+      "mandDate": "2026-11-11",
+      "customDates": {
+        "halbzeit": "2026-06-01",
+        "mand": "2026-11-25",
+        "mandFrist": "2026-11-20",
+        "vorb": "2026-11-17",
+        "vorbFrist": "2026-11-13",
+        "review": "2026-11-04"
+      },
+      "status": {
+        "halbzeit": "angemeldet",
+        "review": "geplant",
+        "vorbFrist": "geplant",
+        "vorb": "geplant",
+        "mandFrist": "geplant",
+        "mand": "geplant"
+      },
+      "color": "#db2777"
+    },
+    {
+      "id": 4,
+      "name": "Crime",
+      "mandDate": "2027-02-24",
+      "customDates": {},
+      "status": {
+        "halbzeit": "geplant",
+        "review": "geplant",
+        "vorbFrist": "geplant",
+        "vorb": "geplant",
+        "mandFrist": "geplant",
+        "mand": "geplant"
+      },
+      "color": "#ea580c"
+    }
+  ],
+  "blockers": [
+    "2026-03-30",
+    "2026-03-31",
+    "2026-04-01",
+    "2026-04-02",
+    "2026-04-03",
+    "2026-04-04",
+    "2026-04-05",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-07-04",
+    "2026-07-05",
+    "2026-07-06",
+    "2026-07-07",
+    "2026-07-08",
+    "2026-07-09",
+    "2026-07-10",
+    "2026-07-11",
+    "2026-07-12",
+    "2026-07-13",
+    "2026-07-14",
+    "2026-07-15",
+    "2026-07-16",
+    "2026-07-17",
+    "2026-07-18",
+    "2026-07-19"
+  ],
+  "hiddenProducts": []
+};
 // @@SAVED_STATE_END@@
 // Load order: 1) saved in file, 2) localStorage, 3) defaults
 const _ls = (()=>{ try { const v=localStorage.getItem(LS_KEY); return v?JSON.parse(v):null; } catch(e){return null;} })();
@@ -1010,6 +1096,7 @@ function App() {
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<Root />);
+  
   </script>
 </body>
 </html>

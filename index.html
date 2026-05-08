@@ -13,6 +13,7 @@
   <div id="root"></div>
   <script type="text/babel">
 
+
     const { useState, useMemo, useRef, useEffect } = React;
     const LS_KEY = 'mandatierungskalender_state';
 
@@ -212,7 +213,11 @@ const SAVED_STATE = {
     "2026-07-16",
     "2026-07-17",
     "2026-07-18",
-    "2026-07-19"
+    "2026-07-19",
+    "2026-10-21",
+    "2026-10-22",
+    "2026-10-23",
+    "2026-10-20"
   ],
   "hiddenProducts": []
 };
@@ -1096,6 +1101,7 @@ function App() {
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<Root />);
+  
   
   </script>
 </body>

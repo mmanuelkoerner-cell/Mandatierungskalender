@@ -13,10 +13,102 @@
   <div id="root"></div>
   <script type="text/babel">
 
-
     const { useState, useMemo, useRef, useEffect } = React;
     const LS_KEY = 'mandatierungskalender_state';
-
+    // @@SAVED_STATE_START@@
+const SAVED_STATE = {
+  "products": [
+    {
+      "id": 2,
+      "name": "Dachmarke",
+      "mandDate": "2026-04-29",
+      "customDates": {
+        "halbzeit": "2026-12-09"
+      },
+      "status": {
+        "halbzeit": "angemeldet",
+        "review": "geplant",
+        "vorbFrist": "angemeldet",
+        "vorb": "angemeldet",
+        "mandFrist": "angemeldet",
+        "mand": "angemeldet"
+      },
+      "color": "#0891b2"
+    },
+    {
+      "id": 3,
+      "name": "DRI",
+      "mandDate": "2026-11-11",
+      "customDates": {
+        "halbzeit": "2026-06-01",
+        "mand": "2026-11-25",
+        "mandFrist": "2026-11-20",
+        "vorb": "2026-11-17",
+        "vorbFrist": "2026-11-13",
+        "review": "2026-11-04"
+      },
+      "status": {
+        "halbzeit": "angemeldet",
+        "review": "geplant",
+        "vorbFrist": "geplant",
+        "vorb": "geplant",
+        "mandFrist": "geplant",
+        "mand": "geplant"
+      },
+      "color": "#db2777"
+    },
+    {
+      "id": 4,
+      "name": "Crime",
+      "mandDate": "2026-01-14",
+      "color": "#dc2626",
+      "customDates": {},
+      "status": {
+        "halbzeit": "geplant",
+        "review": "geplant",
+        "vorbFrist": "geplant",
+        "vorb": "geplant",
+        "mandFrist": "geplant",
+        "mand": "geplant"
+      }
+    }
+  ],
+  "blockers": [
+    "2026-03-30",
+    "2026-03-31",
+    "2026-04-01",
+    "2026-04-02",
+    "2026-04-03",
+    "2026-04-04",
+    "2026-04-05",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-07-04",
+    "2026-07-05",
+    "2026-07-06",
+    "2026-07-07",
+    "2026-07-08",
+    "2026-07-09",
+    "2026-07-10",
+    "2026-07-11",
+    "2026-07-12",
+    "2026-07-13",
+    "2026-07-14",
+    "2026-07-15",
+    "2026-07-16",
+    "2026-07-17",
+    "2026-07-18",
+    "2026-07-19",
+    "2026-10-21",
+    "2026-10-22",
+    "2026-10-23",
+    "2026-10-20"
+  ],
+  "hiddenProducts": []
+};
+// @@SAVED_STATE_END@@
+    const _ls = (()=>{ try { const v=localStorage.getItem(LS_KEY); return v?JSON.parse(v):null; } catch(e){return null;} })();
+    const _src = SAVED_STATE || _ls;
 
 const MONTHS_FULL = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 const DAYS_DE = ["So","Mo","Di","Mi","Do","Fr","Sa"];
@@ -67,8 +159,8 @@ function calcOneCycle(mandDateStr) {
   const vorb=addDays(mand,-8);
   const vorbFrist=prevFriday(vorb);
   const mandFrist=prevFriday(mand);
-  const review=addDays(mand,-14);
-  const halbzeit=addMonths(mand,-6);
+  const review=addDays(vorbFrist,-7);          // ~1 Woche vor Frist Vorbereitung
+  const halbzeit=addMonths(mand,6);            // ~6 Monate nach Mandatierung (im Zeitraum)
   return { halbzeit, review, vorbFrist, vorb, mandFrist, mand };
 }
 
@@ -77,6 +169,45 @@ function nextCycleMand(mandDateStr) {
   d.setFullYear(d.getFullYear()+1);
   while(d.getDay()!==3) d.setDate(d.getDate()+1);
   return toISO(d);
+}
+
+// ── Hessen public holidays ────────────────────────────────────────
+function easterSunday(year) {
+  // Anonymous Gregorian algorithm
+  const a=year%19, b=Math.floor(year/100), c=year%100;
+  const d=Math.floor(b/4), e=b%4, f=Math.floor((b+8)/25);
+  const g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30;
+  const i=Math.floor(c/4), k=c%4, l=(32+2*e+2*i-h-k)%7;
+  const m=Math.floor((a+11*h+22*l)/451);
+  const month=Math.floor((h+l-7*m+114)/31);
+  const day=((h+l-7*m+114)%31)+1;
+  return new Date(year, month-1, day);
+}
+function hessenHolidays(year) {
+  const e = easterSunday(year);
+  const add = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+n); return x; };
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return new Set([
+    `${year}-01-01`,            // Neujahr
+    iso(add(e,-2)),             // Karfreitag
+    iso(add(e, 1)),             // Ostermontag
+    `${year}-05-01`,            // Tag der Arbeit
+    iso(add(e,39)),             // Christi Himmelfahrt
+    iso(add(e,50)),             // Pfingstmontag
+    iso(add(e,60)),             // Fronleichnam
+    `${year}-10-03`,            // Tag der Deutschen Einheit
+    `${year}-12-25`,            // 1. Weihnachtsfeiertag
+    `${year}-12-26`,            // 2. Weihnachtsfeiertag
+  ]);
+}
+// Pre-compute for all calendar years
+const HOLIDAYS = {};
+[2026,2027,2028,2029,2030].forEach(y => { HOLIDAYS[y] = hessenHolidays(y); });
+
+// Period label: "26-27" for a mandate in 2026
+function getPeriodLabel(mandDateStr) {
+  const yr = new Date(mandDateStr).getFullYear();
+  return `${String(yr).slice(2)}-${String(yr+1).slice(2)}`;
 }
 
 // Returns array of cycle objects: { cycleIndex, dates }
@@ -91,7 +222,8 @@ function getAllCycles(product, numCycles=3) {
       dates[key]=(i===0&&product.customDates?.[key])?parseISO(product.customDates[key]):base[key];
     }
     cycles.push({ cycleIndex:i, mandDate, dates,
-      status: i===0 ? product.status : {...BASE_STATUS} });
+      status: i===0 ? product.status : {...BASE_STATUS},
+      periodLabel: getPeriodLabel(mandDate) });
     mandDate=nextCycleMand(mandDate);
   }
   return cycles;
@@ -130,109 +262,14 @@ const PRODUCT_COLORS = [
   "#0284c7","#9333ea","#d97706","#dc2626","#0f766e",
 ];
 
-// @@SAVED_STATE_START@@
-const SAVED_STATE = {
-  "products": [
-    {
-      "id": 2,
-      "name": "Dachmarke",
-      "mandDate": "2026-04-29",
-      "customDates": {
-        "review": "2026-07-29"
-      },
-      "status": {
-        "halbzeit": "erledigt",
-        "review": "geplant",
-        "vorbFrist": "angemeldet",
-        "vorb": "angemeldet",
-        "mandFrist": "angemeldet",
-        "mand": "angemeldet"
-      },
-      "color": "#0891b2"
-    },
-    {
-      "id": 3,
-      "name": "DRI",
-      "mandDate": "2026-11-11",
-      "customDates": {
-        "halbzeit": "2026-06-01",
-        "mand": "2026-11-25",
-        "mandFrist": "2026-11-20",
-        "vorb": "2026-11-17",
-        "vorbFrist": "2026-11-13",
-        "review": "2026-11-04"
-      },
-      "status": {
-        "halbzeit": "angemeldet",
-        "review": "geplant",
-        "vorbFrist": "geplant",
-        "vorb": "geplant",
-        "mandFrist": "geplant",
-        "mand": "geplant"
-      },
-      "color": "#db2777"
-    },
-    {
-      "id": 4,
-      "name": "Crime",
-      "mandDate": "2027-02-24",
-      "customDates": {},
-      "status": {
-        "halbzeit": "geplant",
-        "review": "geplant",
-        "vorbFrist": "geplant",
-        "vorb": "geplant",
-        "mandFrist": "geplant",
-        "mand": "geplant"
-      },
-      "color": "#ea580c"
-    }
-  ],
-  "blockers": [
-    "2026-03-30",
-    "2026-03-31",
-    "2026-04-01",
-    "2026-04-02",
-    "2026-04-03",
-    "2026-04-04",
-    "2026-04-05",
-    "2026-04-23",
-    "2026-04-24",
-    "2026-07-04",
-    "2026-07-05",
-    "2026-07-06",
-    "2026-07-07",
-    "2026-07-08",
-    "2026-07-09",
-    "2026-07-10",
-    "2026-07-11",
-    "2026-07-12",
-    "2026-07-13",
-    "2026-07-14",
-    "2026-07-15",
-    "2026-07-16",
-    "2026-07-17",
-    "2026-07-18",
-    "2026-07-19",
-    "2026-10-21",
-    "2026-10-22",
-    "2026-10-23",
-    "2026-10-20"
-  ],
-  "hiddenProducts": []
-};
-// @@SAVED_STATE_END@@
-// Load order: 1) saved in file, 2) localStorage, 3) defaults
-const _ls = (()=>{ try { const v=localStorage.getItem(LS_KEY); return v?JSON.parse(v):null; } catch(e){return null;} })();
-const _src = SAVED_STATE || _ls;
 const INITIAL_PRODUCTS = _src ? _src.products : [
   { id:1, name:"F2000",     mandDate:"2026-05-27", customDates:{}, status:{...BASE_STATUS}, color:"#7c3aed" },
   { id:2, name:"Dachmarke", mandDate:"2026-04-29", customDates:{}, status:{...BASE_STATUS}, color:"#0891b2" },
   { id:3, name:"DRI",       mandDate:"2026-11-11", customDates:{}, status:{...BASE_STATUS}, color:"#db2777" },
   { id:4, name:"Crime",     mandDate:"2027-02-24", customDates:{}, status:{...BASE_STATUS}, color:"#ea580c" },
 ];
-const INITIAL_BLOCKERS    = _src ? new Set(_src.blockers) : new Set();
-const INITIAL_HIDDEN      = _src ? new Set(_src.hiddenProducts) : new Set();
+const INITIAL_BLOCKERS = _src ? new Set(_src.blockers) : new Set();
+const INITIAL_HIDDEN   = _src ? new Set(_src.hiddenProducts) : new Set();
 
 const ZOOM_LEVELS = [0.6, 0.75, 0.9, 1.0, 1.2, 1.5, 1.8];
 const ZOOM_LABELS  = ["60%","75%","90%","100%","120%","150%","180%"];
@@ -244,13 +281,19 @@ function App() {
   const [editId, setEditId]                 = useState(null);
   const [form, setForm]                     = useState({ name:"", mandDate:"", color:PRODUCT_COLORS[0] });
   const [activeView, setActiveView]         = useState("calendar");
+  const [selectedCycleIndex, setSelectedCycleIndex] = useState(0);
   const [tooltip, setTooltip]               = useState(null);
   const [confirmDelete, setConfirmDelete]   = useState(null);
-  const [hiddenProducts, setHiddenProducts] = useState(new Set());
+  const [hiddenProducts, setHiddenProducts] = useState(INITIAL_HIDDEN);
+  const [hiddenPeriods,  setHiddenPeriods]  = useState(new Set());
   const [blockers, setBlockers]             = useState(INITIAL_BLOCKERS);
   const [blockerMode, setBlockerMode]       = useState(false);
   const [zoomIdx, setZoomIdx]               = useState(3);
   const [calYear, setCalYear]               = useState(2026);
+  const [detailCycleIndex, setDetailCycleIndex] = useState(0);
+
+  // Reset cycle index when selected product changes
+  useEffect(()=>{ setDetailCycleIndex(0); },[selected]);
 
   const [confirmDrop, setConfirmDrop] = useState(null); // { pid, key, iso }
   const blockerDragStart = useRef(null);
@@ -266,38 +309,6 @@ function App() {
   const abbrFont    = Math.round(8  * zoom);
   const colW        = Math.round(36 * zoom);
 
-
-  // ── Auto-save to localStorage ────────────────────────────────────
-  useEffect(() => {
-    try {
-      const state = {
-        products,
-        blockers: Array.from(blockers),
-        hiddenProducts: Array.from(hiddenProducts),
-      };
-      localStorage.setItem(LS_KEY, JSON.stringify(state));
-    } catch(e) {}
-  }, [products, blockers, hiddenProducts]);
-
-  // ── Warn before closing if unsaved ──────────────────────────────
-  const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify({
-    products: INITIAL_PRODUCTS,
-    blockers: Array.from(INITIAL_BLOCKERS),
-    hiddenProducts: Array.from(INITIAL_HIDDEN),
-  }));
-  const isDirty = JSON.stringify({ products, blockers: Array.from(blockers), hiddenProducts: Array.from(hiddenProducts) }) !== savedSnapshot;
-
-  useEffect(() => {
-    const handler = (e) => {
-      if (isDirty) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [isDirty]);
-
   // ── Helpers ──────────────────────────────────────────────────────
   const nextId = () => Math.max(0,...products.map(p=>p.id))+1;
 
@@ -311,59 +322,46 @@ function App() {
     }
     setShowForm(false); setEditId(null); setForm({name:"",mandDate:"",color:PRODUCT_COLORS[0]});
   }
+  // ── Auto-save + dirty state + close warning ──────────────────────
+  useEffect(()=>{
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({ products, blockers:Array.from(blockers), hiddenProducts:Array.from(hiddenProducts) }));
+    } catch(e){}
+  },[products,blockers,hiddenProducts]);
+
+  const [savedSnapshot, setSavedSnapshot] = useState(()=>JSON.stringify({
+    products:INITIAL_PRODUCTS, blockers:[], hiddenProducts:[]
+  }));
+  const isDirty = JSON.stringify({ products, blockers:Array.from(blockers), hiddenProducts:Array.from(hiddenProducts) }) !== savedSnapshot;
+
+  useEffect(()=>{
+    const handler=(e)=>{ if(isDirty){ e.preventDefault(); e.returnValue=''; } };
+    window.addEventListener('beforeunload', handler);
+    return ()=>window.removeEventListener('beforeunload', handler);
+  },[isDirty]);
 
   // ── Save to file ─────────────────────────────────────────────────
   function saveToFile() {
-    const state = {
-      products: products,
-      blockers: Array.from(blockers),
-      hiddenProducts: Array.from(hiddenProducts),
-    };
+    const state = { products, blockers:Array.from(blockers), hiddenProducts:Array.from(hiddenProducts) };
     const stateJson = JSON.stringify(state, null, 2);
-    const newBlock =
-      "// @@SAVED_STATE_START@@\nconst SAVED_STATE = " + stateJson + ";\n// @@SAVED_STATE_END@@";
-
-    // Read ORIGINAL source from the babel script tag (never modified by React)
+    const newBlock = "// @@SAVED_STATE_START@@\nconst SAVED_STATE = " + stateJson + ";\n// @@SAVED_STATE_END@@";
     const babelEl = document.querySelector('script[type="text/babel"]');
     const originalSource = babelEl.textContent;
-    const newSource = originalSource.replace(
-      /\/\/ @@SAVED_STATE_START@@[\s\S]*?\/\/ @@SAVED_STATE_END@@/,
-      newBlock
-    );
-
-    // Rebuild clean HTML from scratch
-    const newHtml = [
-      '<!DOCTYPE html>',
-      '<html lang="de">',
-      '<head>',
-      '  <meta charset="UTF-8" />',
-      '  <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+    const newSource = originalSource.replace(/\/\/ @@SAVED_STATE_START@@[\s\S]*?\/\/ @@SAVED_STATE_END@@/, newBlock);
+    const newHtml = ['<!DOCTYPE html>','<html lang="de">','<head>',
+      '  <meta charset="UTF-8" />','  <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
       '  <title>Mandatierungskalender</title>',
       '  <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>',
       '  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>',
       '  <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>',
-      '  <style>body{margin:0;padding:0}<\/style>',
-      '</head>',
-      '<body>',
-      '  <div id="root"></div>',
-      '  <script type="text/babel">',
-      newSource,
-      '  <\/script>',
-      '</body>',
-      '</html>'
-    ].join('\n');
-
-    const blob = new Blob([newHtml], { type: "text/html;charset=utf-8" });
+      '  <style>body{margin:0;padding:0}<\/style>','</head>','<body>','  <div id="root"></div>',
+      '  <script type="text/babel">',newSource,'  <\/script>','</body>','</html>'].join('\n');
+    const blob = new Blob([newHtml], {type:"text/html;charset=utf-8"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = "Mandatierungskalender.html";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    // Mark as clean after file save
-    setSavedSnapshot(JSON.stringify({ products, blockers: Array.from(blockers), hiddenProducts: Array.from(hiddenProducts) }));
+    a.href=url; a.download="Mandatierungskalender.html";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    setSavedSnapshot(JSON.stringify(state));
   }
 
   function doDelete() {
@@ -428,16 +426,17 @@ function App() {
     const list=[];
     products.forEach(p=>{
       if(hiddenProducts.has(p.id))return;
-      getAllCycles(p,4).forEach(cycle=>{
+      getAllCycles(p,6).forEach(cycle=>{
+        if(hiddenPeriods.has(cycle.periodLabel))return;
         EVENT_KEYS.forEach(key=>{
           const date=cycle.dates[key]; if(!date)return;
           list.push({productId:p.id,productName:p.name,productColor:p.color,abbr:makeAbbr(p.name),
-            key,date,status:cycle.status[key]??'geplant',cycleIndex:cycle.cycleIndex});
+            key,date,status:cycle.status[key]??'geplant',cycleIndex:cycle.cycleIndex,periodLabel:cycle.periodLabel});
         });
       });
     });
     return list;
-  },[products,hiddenProducts]);
+  },[products,hiddenProducts,hiddenPeriods]);
 
   const eventsByMonthDay=useMemo(()=>{
     const map={};
@@ -456,15 +455,16 @@ function App() {
     products.forEach(p=>{
       if(!p) return;
       if(hiddenProducts.has(p.id)) return;
-      getAllCycles(p,4).forEach(cycle=>{
+      getAllCycles(p,6).forEach(cycle=>{
+        if(hiddenPeriods.has(cycle.periodLabel)) return;
         EVENT_KEYS.forEach(key=>{
           const date=cycle.dates[key]; if(!date)return;
-          list.push({productId:p.id,productName:p.name,productColor:p.color,key,date,status:cycle.status[key]??'geplant'});
+          list.push({productId:p.id,productName:p.name,productColor:p.color,key,date,status:cycle.status[key]??'geplant',periodLabel:cycle.periodLabel});
         });
       });
     });
     return list.sort((a,b)=>a.date-b.date);
-  },[products,hiddenProducts]);
+  },[products,hiddenProducts,hiddenPeriods]);
 
   // Upcoming (future from today)
   const upcomingEvents=useMemo(()=>{
@@ -472,15 +472,27 @@ function App() {
     return allEventsSorted.filter(e=>e.date>=today).slice(0,12);
   },[allEventsSorted]);
 
-  // Events by (year, month) for timeline
+  // All unique period labels across all products
+  const allPeriods=useMemo(()=>{
+    const set=new Set();
+    products.forEach(p=>getAllCycles(p,6).forEach(c=>set.add(c.periodLabel)));
+    return Array.from(set).sort();
+  },[products]);
+
+  function togglePeriod(label) {
+    setHiddenPeriods(prev=>{const n=new Set(prev); n.has(label)?n.delete(label):n.add(label); return n;});
+  }
+
+  // Events by (year, month) for timeline — also filtered by hiddenPeriods
   function eventsForYearMonth(productObj, year, mi) {
-    const cycles=getAllCycles(productObj,4);
+    const cycles=getAllCycles(productObj,6);
     const results=[];
     cycles.forEach(cycle=>{
+      if(hiddenPeriods.has(cycle.periodLabel))return;
       EVENT_KEYS.forEach(key=>{
         const date=cycle.dates[key];
         if(date&&date.getFullYear()===year&&date.getMonth()===mi)
-          results.push({key,date,status:cycle.status[key]??'geplant'});
+          results.push({key,date,status:cycle.status[key]??'geplant',periodLabel:cycle.periodLabel});
       });
     });
     return results;
@@ -540,7 +552,7 @@ function App() {
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <button onClick={saveToFile} style={{display:"flex",alignItems:"center",gap:6,background:isDirty?"#f0fdf4":"white",border:isDirty?"2px solid #22c55e":"2px solid #d1fae5",color:isDirty?"#16a34a":"#86efac",padding:"7px 14px",borderRadius:7,cursor:"pointer",fontSize:12,fontFamily:"'Inter',sans-serif",fontWeight:700,boxShadow:isDirty?"0 1px 3px rgba(34,197,94,.2)":"none",transition:"all .3s"}}>
+          <button onClick={saveToFile} style={{display:"flex",alignItems:"center",gap:6,background:isDirty?"#f0fdf4":"white",border:isDirty?"2px solid #22c55e":"2px solid #d1fae5",color:isDirty?"#16a34a":"#86efac",padding:"7px 14px",borderRadius:7,cursor:"pointer",fontSize:12,fontFamily:"'Inter',sans-serif",fontWeight:700,transition:"all .3s"}}>
             {isDirty ? "💾 Speichern*" : "✓ Gespeichert"}
           </button>
           <button className="add-btn" onClick={()=>{setEditId(null);setForm({name:"",mandDate:"",color:PRODUCT_COLORS[products.length%PRODUCT_COLORS.length]});setShowForm(true);}}>+ Produkt hinzufügen</button>
@@ -586,7 +598,7 @@ function App() {
                   <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 8px",borderRadius:7,background:selected===p.id?"#eff6ff":"transparent",border:selected===p.id?"1.5px solid #bfdbfe":"1.5px solid transparent"}}>
                     <div style={{width:8,height:8,borderRadius:"50%",background:p.color,flexShrink:0}} />
                     <span style={{flex:1,fontSize:12,fontWeight:500,color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"pointer"}}
-                      onClick={()=>{setSelected(p.id===selected?null:p.id);setActiveView("detail");}}>
+                      onClick={()=>{setSelected(p.id===selected?null:p.id);setSelectedCycleIndex(0);setActiveView("detail");}}>
                       {p.name} <span style={{color:"#94a3b8",fontSize:10}}>({makeAbbr(p.name)})</span>
                     </span>
                     <button className="edit-btn" onClick={()=>editProduct(p)}>✎</button>
@@ -662,7 +674,7 @@ function App() {
               {/* Toolbar */}
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
                 <div style={{display:"flex",alignItems:"center",gap:4,background:"white",border:"1.5px solid #e2e8f0",borderRadius:8,padding:"4px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
-                  {[2026,2027].map(y=>(
+                  {[2026,2027,2028,2029,2030].map(y=>(
                     <button key={y} className={`year-btn ${calYear===y?"active":"inactive"}`} onClick={()=>setCalYear(y)}>{y}</button>
                   ))}
                 </div>
@@ -678,6 +690,20 @@ function App() {
                   </button>
                 )}
                 <div style={{flex:1}} />
+                {/* Period toggles */}
+                {allPeriods.length>0&&(
+                  <div style={{display:"flex",alignItems:"center",gap:4,background:"white",border:"1.5px solid #e2e8f0",borderRadius:8,padding:"4px 8px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                    <span style={{fontSize:11,color:"#64748b",fontWeight:600,marginRight:2}}>Zeitraum</span>
+                    {allPeriods.map(label=>{
+                      const active=!hiddenPeriods.has(label);
+                      return <button key={label} onClick={()=>togglePeriod(label)}
+                        style={{padding:"3px 8px",borderRadius:6,border:"1.5px solid",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",transition:"all .15s",
+                          borderColor:active?"#3b82f6":"#e2e8f0",background:active?"#eff6ff":"white",color:active?"#1d4ed8":"#94a3b8"}}>
+                        {label}
+                      </button>;
+                    })}
+                  </div>
+                )}
                 <div style={{display:"flex",alignItems:"center",gap:6,background:"white",border:"1.5px solid #e2e8f0",borderRadius:8,padding:"4px 8px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
                   <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Zoom</span>
                   <button className="zoom-btn" disabled={zoomIdx<=0} onClick={()=>setZoomIdx(i=>Math.max(0,i-1))}>−</button>
@@ -731,19 +757,21 @@ function App() {
                         const iso=`${calYear}-${String(mi+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
                         const evts=eventsByMonthDay[`${mi}-${day}`]||[];
                         const hasEvt=evts.length>0;
+                        const isHoliday=!!HOLIDAYS[calYear]?.has(iso);
                         const isBlocker=blockers.has(iso);
                         const isDragged=isDraggedBlocker(iso);
                         const isDrop=dragOver&&dragOver.mi===mi&&dragOver.day===day;
                         const kw=isMon?getISOWeek(dateObj):null;
                         const todayISO=toISO(new Date());
                         const isToday=iso===todayISO;
+                        const isDimmed=isWeekend||isHoliday;
 
                         let bg="white";
                         if(isDrop) bg="#e0f2fe";
                         else if(isToday) bg="#eff6ff";
                         else if(isBlocker) bg="#f8fafc";
                         else if(hasEvt) bg="#f7f9ff";
-                        else if(isWeekend) bg="#f0f2f5";
+                        else if(isDimmed) bg="#f0f2f5";
 
                         return (
                           <div key={mi} className="cal-col"
@@ -767,7 +795,7 @@ function App() {
                               <span style={{fontSize:metaFont,fontWeight:700,color:isToday?"#1d4ed8":"#111827",fontFamily:"'JetBrains Mono',monospace",lineHeight:1,flexShrink:0,
                                 ...(isToday?{background:"#3b82f6",color:"white",borderRadius:"50%",width:Math.round(15*zoom),height:Math.round(15*zoom),display:"flex",alignItems:"center",justifyContent:"center"}:{})}}>{day}</span>
                               {isMon&&<span style={{fontSize:Math.round(8*zoom),fontWeight:600,color:"#3b82f6",lineHeight:1,flexShrink:0}}>KW{kw}</span>}
-                              <span style={{fontSize:metaFont,fontWeight:isWeekend?400:700,color:isWeekend?"#cbd5e1":isToday?"#3b82f6":"#111827",lineHeight:1,marginLeft:"auto",flexShrink:0}}>{DAYS_DE[dow].slice(0,2)}</span>
+                              <span style={{fontSize:metaFont,fontWeight:isDimmed?400:700,color:isDimmed?"#cbd5e1":isToday?"#3b82f6":"#111827",lineHeight:1,marginLeft:"auto",flexShrink:0}}>{DAYS_DE[dow].slice(0,2)}</span>
                             </div>
 
                             {/* Event rows */}
@@ -780,7 +808,7 @@ function App() {
                                     draggable={!blockerMode}
                                     onDragStart={ev=>onDragStart(ev,e.productId,e.key)}
                                     onDragEnd={onDragEnd}
-                                    onClick={ev=>{ev.stopPropagation();if(!blockerMode){setSelected(e.productId);setActiveView("detail");}}}
+                                    onClick={ev=>{ev.stopPropagation();if(!blockerMode){setSelected(e.productId);setSelectedCycleIndex(0);setActiveView("detail");}}}
                                     onMouseEnter={ev=>{const r=ev.currentTarget.getBoundingClientRect();setTooltip({x:r.left+r.width/2,y:r.bottom+4,evts:[e]});}}
                                     onMouseLeave={()=>setTooltip(null)}
                                     style={{height:evtRowH,background:cfg.bg,border:`1.5px solid ${cfg.color}44`,borderLeft:`3px solid ${cfg.color}`}}
@@ -792,6 +820,7 @@ function App() {
                                     </div>
                                     <div style={{flexShrink:0,paddingRight:Math.round(4*zoom),paddingLeft:Math.round(3*zoom),display:"flex",alignItems:"center",gap:Math.round(3*zoom)}}>
                                       <div style={{width:Math.round(5*zoom),height:Math.round(5*zoom),borderRadius:"50%",background:sc.color,flexShrink:0}} />
+                                      {zoom>=0.9&&<div style={{fontSize:Math.round(7*zoom),fontWeight:700,color:cfg.color,opacity:.7,whiteSpace:"nowrap",flexShrink:0,fontFamily:"'JetBrains Mono',monospace"}}>{e.periodLabel}</div>}
                                       <div style={{background:e.productColor,color:"white",fontSize:abbrFont,fontWeight:700,padding:`0 ${Math.round(4*zoom)}px`,borderRadius:Math.round(3*zoom),lineHeight:`${evtRowH-Math.round(6*zoom)}px`,whiteSpace:"nowrap",flexShrink:0}}>
                                         {e.abbr}
                                       </div>
@@ -818,6 +847,20 @@ function App() {
           {/* ════════════════ TIMELINE ════════════════ */}
           {activeView==="timeline"&&(
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {/* Period filter bar */}
+              {allPeriods.length>0&&(
+                <div style={{display:"flex",alignItems:"center",gap:6,background:"white",border:"1.5px solid #e2e8f0",borderRadius:8,padding:"6px 12px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                  <span style={{fontSize:11,color:"#64748b",fontWeight:700,marginRight:4}}>Mandatierungszeitraum</span>
+                  {allPeriods.map(label=>{
+                    const active=!hiddenPeriods.has(label);
+                    return <button key={label} onClick={()=>togglePeriod(label)}
+                      style={{padding:"3px 10px",borderRadius:6,border:"1.5px solid",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",transition:"all .15s",
+                        borderColor:active?"#3b82f6":"#e2e8f0",background:active?"#eff6ff":"white",color:active?"#1d4ed8":"#94a3b8"}}>
+                      {label}
+                    </button>;
+                  })}
+                </div>
+              )}
               {[2026,2027].map(yr=>(
                 <div key={yr} style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"18px",overflow:"auto",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
                   <div style={{fontSize:13,fontWeight:800,color:"#3b82f6",marginBottom:14,letterSpacing:"-.3px"}}>{yr}</div>
@@ -844,10 +887,11 @@ function App() {
                         return (
                           <div key={mi} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:1,minHeight:28,flexWrap:"wrap"}}>
                             {monthEvts.map((e,i)=>(
-                              <div key={i} title={`${EVENT_TYPES[e.key].label}: ${fmt(e.date)}`}
+                              <div key={i} title={`${EVENT_TYPES[e.key].label}: ${fmt(e.date)} [${e.periodLabel}]`}
                                 style={{width:22,height:17,borderRadius:3,background:EVENT_TYPES[e.key].bg,border:`1.5px solid ${EVENT_TYPES[e.key].color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:EVENT_TYPES[e.key].color,position:"relative",cursor:"default"}}>
                                 {EVENT_TYPES[e.key].short}
                                 <div style={{position:"absolute",top:-3,right:-3,width:5,height:5,borderRadius:"50%",background:STATUS_CONFIG[e.status]?.color||"#9ca3af",border:"1px solid white"}} />
+                                <div style={{position:"absolute",bottom:-8,left:"50%",transform:"translateX(-50%)",fontSize:6,fontWeight:700,color:"#3b82f6",whiteSpace:"nowrap",fontFamily:"'JetBrains Mono',monospace",lineHeight:1}}>{e.periodLabel}</div>
                               </div>
                             ))}
                           </div>
@@ -866,78 +910,132 @@ function App() {
               <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"60px",textAlign:"center",color:"#cbd5e1",fontWeight:500,boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
                 Wähle ein Produkt aus der linken Liste.
               </div>
-            ):(
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-                <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"20px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,paddingBottom:14,borderBottom:"1.5px solid #f1f5f9"}}>
+            ):(()=>{
+              const allDetailCycles = getAllCycles(selectedProduct, 6);
+              const detailCycle = allDetailCycles[detailCycleIndex] || allDetailCycles[0];
+              const isEditableCycle = detailCycleIndex === 0;
+              // For cycle 0: use selectedProduct.dates (with custom overrides) + selectedProduct.status
+              // For cycle > 0: use calculated dates only (read-only)
+              const detailDates = isEditableCycle ? selectedProduct.dates : detailCycle.dates;
+              const detailStatus = isEditableCycle ? selectedProduct.status : detailCycle.status;
+
+              return (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+
+                {/* Cycle switcher */}
+                <div style={{display:"flex",alignItems:"center",gap:8,background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"12px 16px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginRight:4}}>
                     <div style={{width:10,height:10,borderRadius:"50%",background:selectedProduct.color}} />
-                    <span style={{fontWeight:700,fontSize:16,color:"#0f172a"}}>{selectedProduct.name}</span>
-                    <span style={{fontSize:11,fontWeight:700,color:"white",background:selectedProduct.color,padding:"1px 7px",borderRadius:5,marginLeft:2}}>{makeAbbr(selectedProduct.name)}</span>
-                    <span style={{fontSize:11,color:"#94a3b8",fontFamily:"'JetBrains Mono',monospace",marginLeft:"auto"}}>Mand. {fmt(selectedProduct.dates?.mand)}</span>
+                    <span style={{fontWeight:700,fontSize:15,color:"#0f172a"}}>{selectedProduct.name}</span>
+                    <span style={{fontSize:11,fontWeight:700,color:"white",background:selectedProduct.color,padding:"1px 7px",borderRadius:5}}>{makeAbbr(selectedProduct.name)}</span>
                   </div>
-                  {selectedProduct.dates&&Object.entries(EVENT_TYPES).map(([key,cfg])=>{
-                    const date=selectedProduct.dates[key]; if(!date)return null;
-                    const status=selectedProduct.status[key];
-                    const scfg=STATUS_CONFIG[status]||STATUS_CONFIG.geplant;
-                    const isCustom=!!(selectedProduct.customDates?.[key]);
+                  <div style={{width:1,height:20,background:"#e2e8f0",margin:"0 4px"}} />
+                  <span style={{fontSize:11,fontWeight:600,color:"#94a3b8",marginRight:4}}>Mandatierungszeitraum:</span>
+                  {allDetailCycles.map((c,i)=>{
+                    const active = i === detailCycleIndex;
                     return (
-                      <div key={key} style={{padding:"11px 12px",borderRadius:9,marginBottom:8,background:cfg.bg,border:`1.5px solid ${cfg.color}33`}}>
-                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                          <div style={{width:32,height:32,borderRadius:8,background:"white",border:`1.5px solid ${cfg.color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:cfg.color,flexShrink:0}}>{cfg.short}</div>
-                          <div style={{flex:1}}>
-                            <div style={{fontSize:11,color:"#64748b",marginBottom:1}}>{cfg.label}</div>
-                            {isCustom&&<span style={{fontSize:9,color:"#d97706",fontWeight:600,background:"#fef9c3",padding:"1px 5px",borderRadius:3}}>Manuell</span>}
-                          </div>
-                          <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                            {Object.entries(STATUS_CONFIG).map(([sk,sv])=>(
-                              <button key={sk} className="status-pill"
-                                style={{borderColor:status===sk?sv.color:"#e2e8f0",background:status===sk?sv.bg:"white",color:status===sk?sv.color:"#94a3b8"}}
-                                onClick={()=>updateStatus(selectedProduct.id,key,sk)}>{sv.label}</button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="date-input-row">
-                          <input type="date" value={toISO(date)} onChange={e=>updateEventDate(selectedProduct.id,key,e.target.value)} style={{borderColor:`${cfg.color}66`}} />
-                          <span style={{fontSize:10,color:"#94a3b8",flexShrink:0,fontFamily:"'JetBrains Mono',monospace"}}>{DAYS_DE[date.getDay()]} KW{getISOWeek(date)}</span>
-                          {isCustom&&<button className="reset-btn" onClick={()=>resetEventDate(selectedProduct.id,key)}>↺ Reset</button>}
-                        </div>
-                      </div>
+                      <button key={i} onClick={()=>setDetailCycleIndex(i)}
+                        style={{padding:"4px 12px",borderRadius:6,border:"1.5px solid",fontSize:11,fontWeight:700,cursor:"pointer",
+                          fontFamily:"'JetBrains Mono',monospace",transition:"all .15s",
+                          borderColor:active?selectedProduct.color:"#e2e8f0",
+                          background:active?selectedProduct.color+"18":"white",
+                          color:active?selectedProduct.color:"#94a3b8"}}>
+                        {c.periodLabel}
+                      </button>
                     );
                   })}
+                  {!isEditableCycle&&(
+                    <span style={{marginLeft:"auto",fontSize:10,color:"#94a3b8",fontStyle:"italic"}}>
+                      ⚠ Zukünftiger Zeitraum · nur lesbar
+                    </span>
+                  )}
                 </div>
-                <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"20px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
-                  <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:".07em",textTransform:"uppercase",marginBottom:18}}>Prozessschritte</div>
-                  {selectedProduct.dates&&[
-                    {key:"halbzeit",  label:"Halbzeitreview",                 note:"Halbjährliche Zwischenbilanz"},
-                    {key:"review",    label:"Review erstellen & präsentieren", note:"Qualitative & quantitative Zielerreichung"},
-                    {key:"vorbFrist", label:"Dokumente einreichen",            note:"Frist: Freitag 12:00 · Kalkulation + Vorschlag"},
-                    {key:"vorb",      label:"Vorbereitungstermin",             note:"Dienstags · Kalkulation prüfen"},
-                    {key:"mandFrist", label:"Dokumente einreichen",            note:"Frist: Freitag 12:00 · Finale Unterlagen"},
-                    {key:"mand",      label:"Mandatierungsrunde",              note:"Mittwochs · Budget-Entscheid"},
-                  ].map((step,i,arr)=>{
-                    const date=selectedProduct.dates[step.key]; if(!date)return null;
-                    const cfg=EVENT_TYPES[step.key];
-                    const scfg=STATUS_CONFIG[selectedProduct.status[step.key]]||STATUS_CONFIG.geplant;
-                    return (
-                      <div key={step.key} style={{display:"flex",gap:14}}>
-                        <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
-                          <div style={{width:32,height:32,borderRadius:"50%",background:cfg.bg,border:`2px solid ${cfg.color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:cfg.color,flexShrink:0}}>{cfg.short}</div>
-                          {i<arr.length-1&&<div style={{width:2,height:22,background:"#f1f5f9",margin:"2px 0"}} />}
-                        </div>
-                        <div style={{paddingBottom:i<arr.length-1?6:0,paddingTop:4}}>
-                          <div style={{fontSize:12,fontWeight:600,color:"#1e293b",marginBottom:1}}>{step.label}</div>
-                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:5}}>{step.note}</div>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <span style={{fontSize:13,fontFamily:"'JetBrains Mono',monospace",fontWeight:500,color:cfg.color}}>{DAYS_DE[date.getDay()]} {fmt(date)}</span>
-                            <span style={{padding:"1px 8px",borderRadius:20,fontSize:9,fontWeight:600,background:scfg.bg,color:scfg.color,border:`1px solid ${scfg.color}44`}}>{scfg.label}</span>
+
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                  {/* Left: event cards */}
+                  <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"20px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:".07em",textTransform:"uppercase",marginBottom:14}}>
+                      Termine · {detailCycle.periodLabel}
+                    </div>
+                    {detailDates&&Object.entries(EVENT_TYPES).map(([key,cfg])=>{
+                      const date=detailDates[key]; if(!date)return null;
+                      const status=detailStatus[key];
+                      const scfg=STATUS_CONFIG[status]||STATUS_CONFIG.geplant;
+                      const isCustom=isEditableCycle&&!!(selectedProduct.customDates?.[key]);
+                      return (
+                        <div key={key} style={{padding:"11px 12px",borderRadius:9,marginBottom:8,background:cfg.bg,border:`1.5px solid ${cfg.color}33`}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                            <div style={{width:32,height:32,borderRadius:8,background:"white",border:`1.5px solid ${cfg.color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:cfg.color,flexShrink:0}}>{cfg.short}</div>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:11,color:"#64748b",marginBottom:1}}>{cfg.label}</div>
+                              {isCustom&&<span style={{fontSize:9,color:"#d97706",fontWeight:600,background:"#fef9c3",padding:"1px 5px",borderRadius:3}}>Manuell</span>}
+                            </div>
+                            {isEditableCycle?(
+                              <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                                {Object.entries(STATUS_CONFIG).map(([sk,sv])=>(
+                                  <button key={sk} className="status-pill"
+                                    style={{borderColor:status===sk?sv.color:"#e2e8f0",background:status===sk?sv.bg:"white",color:status===sk?sv.color:"#94a3b8"}}
+                                    onClick={()=>updateStatus(selectedProduct.id,key,sk)}>{sv.label}</button>
+                                ))}
+                              </div>
+                            ):(
+                              <span style={{padding:"2px 8px",borderRadius:20,fontSize:9,fontWeight:600,background:scfg.bg,color:scfg.color,border:`1px solid ${scfg.color}44`}}>{scfg.label}</span>
+                            )}
+                          </div>
+                          <div className="date-input-row">
+                            {isEditableCycle?(
+                              <>
+                                <input type="date" value={toISO(date)} onChange={e=>updateEventDate(selectedProduct.id,key,e.target.value)} style={{borderColor:`${cfg.color}66`}} />
+                                <span style={{fontSize:10,color:"#94a3b8",flexShrink:0,fontFamily:"'JetBrains Mono',monospace"}}>{DAYS_DE[date.getDay()]} KW{getISOWeek(date)}</span>
+                                {isCustom&&<button className="reset-btn" onClick={()=>resetEventDate(selectedProduct.id,key)}>↺ Reset</button>}
+                              </>
+                            ):(
+                              <span style={{fontSize:13,fontFamily:"'JetBrains Mono',monospace",fontWeight:500,color:cfg.color}}>
+                                {DAYS_DE[date.getDay()]} {fmt(date)} · KW{getISOWeek(date)}
+                              </span>
+                            )}
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+
+                  {/* Right: process steps */}
+                  <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:10,padding:"20px",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:".07em",textTransform:"uppercase",marginBottom:18}}>Prozessschritte</div>
+                    {detailDates&&[
+                      {key:"halbzeit",  label:"Halbzeitreview",                 note:"Halbjährliche Zwischenbilanz"},
+                      {key:"review",    label:"Review erstellen & präsentieren", note:"Qualitative & quantitative Zielerreichung"},
+                      {key:"vorbFrist", label:"Dokumente einreichen",            note:"Frist: Freitag 12:00 · Kalkulation + Vorschlag"},
+                      {key:"vorb",      label:"Vorbereitungstermin",             note:"Dienstags · Kalkulation prüfen"},
+                      {key:"mandFrist", label:"Dokumente einreichen",            note:"Frist: Freitag 12:00 · Finale Unterlagen"},
+                      {key:"mand",      label:"Mandatierungsrunde",              note:"Mittwochs · Budget-Entscheid"},
+                    ].map((step,i,arr)=>{
+                      const date=detailDates[step.key]; if(!date)return null;
+                      const cfg=EVENT_TYPES[step.key];
+                      const scfg=STATUS_CONFIG[detailStatus[step.key]]||STATUS_CONFIG.geplant;
+                      return (
+                        <div key={step.key} style={{display:"flex",gap:14}}>
+                          <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+                            <div style={{width:32,height:32,borderRadius:"50%",background:cfg.bg,border:`2px solid ${cfg.color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:cfg.color,flexShrink:0}}>{cfg.short}</div>
+                            {i<arr.length-1&&<div style={{width:2,height:22,background:"#f1f5f9",margin:"2px 0"}} />}
+                          </div>
+                          <div style={{paddingBottom:i<arr.length-1?6:0,paddingTop:4}}>
+                            <div style={{fontSize:12,fontWeight:600,color:"#1e293b",marginBottom:1}}>{step.label}</div>
+                            <div style={{fontSize:10,color:"#94a3b8",marginBottom:5}}>{step.note}</div>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontSize:13,fontFamily:"'JetBrains Mono',monospace",fontWeight:500,color:cfg.color}}>{DAYS_DE[date.getDay()]} {fmt(date)}</span>
+                              <span style={{padding:"1px 8px",borderRadius:20,fontSize:9,fontWeight:600,background:scfg.bg,color:scfg.color,border:`1px solid ${scfg.color}44`}}>{scfg.label}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            )
+              );
+            })()
           )}
         </div>
       </div>
@@ -1053,7 +1151,6 @@ function App() {
 
     const CORRECT_PW = "Mandatierung2026!";
     const LS_PW_KEY  = "mandatierungskalender_auth";
-
     function LoginScreen({ onSuccess }) {
       const [pw, setPw] = React.useState("");
       const [error, setError] = React.useState(false);
@@ -1071,37 +1168,24 @@ function App() {
             </div>
             <div style={{marginBottom:16}}>
               <label style={{fontSize:11,fontWeight:600,color:"#64748B",display:"block",marginBottom:8,textTransform:"uppercase",letterSpacing:".06em"}}>Passwort</label>
-              <input
-                type="password"
-                value={pw}
-                onChange={e=>setPw(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&submit()}
-                autoFocus
-                placeholder="Passwort eingeben"
-                style={{width:"100%",boxSizing:"border-box",padding:"10px 14px",background:"#0F172A",border:error?"1.5px solid #EF4444":"1.5px solid #334155",borderRadius:8,color:"#F1F5F9",fontSize:14,fontFamily:"'Inter',sans-serif",outline:"none",transition:"border-color .2s"}}
-              />
-              {error && <div style={{color:"#EF4444",fontSize:12,marginTop:6,fontWeight:500}}>Falsches Passwort. Bitte erneut versuchen.</div>}
+              <input type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} autoFocus placeholder="Passwort eingeben"
+                style={{width:"100%",boxSizing:"border-box",padding:"10px 14px",background:"#0F172A",border:error?"1.5px solid #EF4444":"1.5px solid #334155",borderRadius:8,color:"#F1F5F9",fontSize:14,fontFamily:"'Inter',sans-serif",outline:"none"}} />
+              {error && <div style={{color:"#EF4444",fontSize:12,marginTop:6,fontWeight:500}}>Falsches Passwort.</div>}
             </div>
-            <button
-              onClick={submit}
-              style={{width:"100%",padding:"11px",background:"#3B82F6",border:"none",borderRadius:8,color:"white",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",transition:"background .2s"}}
-              onMouseOver={e=>e.target.style.background="#2563EB"}
-              onMouseOut={e=>e.target.style.background="#3B82F6"}
-            >Anmelden</button>
+            <button onClick={submit} style={{width:"100%",padding:"11px",background:"#3B82F6",border:"none",borderRadius:8,color:"white",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}
+              onMouseOver={e=>e.target.style.background="#2563EB"} onMouseOut={e=>e.target.style.background="#3B82F6"}>Anmelden</button>
           </div>
         </div>
       );
     }
-
     function Root() {
       const [auth, setAuth] = React.useState(()=>sessionStorage.getItem(LS_PW_KEY)==="1");
       function unlock() { sessionStorage.setItem(LS_PW_KEY,"1"); setAuth(true); }
       return auth ? <App /> : <LoginScreen onSuccess={unlock} />;
     }
-
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<Root />);
-  
+
   
   </script>
 </body>

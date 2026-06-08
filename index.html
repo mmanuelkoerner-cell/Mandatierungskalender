@@ -15,6 +15,7 @@
 
 
 
+
     const { useState, useMemo, useRef, useEffect } = React;
     const LS_KEY = 'mandatierungskalender_state';
     // @@SAVED_STATE_START@@
@@ -47,7 +48,7 @@ const SAVED_STATE = {
         "mandFrist": "2026-11-20",
         "vorb": "2026-11-17",
         "vorbFrist": "2026-11-13",
-        "review": "2026-11-04"
+        "review": "2026-11-09"
       },
       "status": {
         "halbzeit": "angemeldet",
@@ -117,7 +118,8 @@ const SAVED_STATE = {
     "2026-11-04",
     "2026-09-07",
     "2026-09-08",
-    "2026-09-17"
+    "2026-09-17",
+    "2026-11-13"
   ],
   "hiddenProducts": []
 };
@@ -1201,6 +1203,7 @@ function App() {
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<Root />);
 
+  
   
   
   

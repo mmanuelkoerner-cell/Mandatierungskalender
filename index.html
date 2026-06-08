@@ -13,9 +13,6 @@
   <div id="root"></div>
   <script type="text/babel">
 
-
-
-
     const { useState, useMemo, useRef, useEffect } = React;
     const LS_KEY = 'mandatierungskalender_state';
     // @@SAVED_STATE_START@@
@@ -65,9 +62,7 @@ const SAVED_STATE = {
       "name": "Crime",
       "mandDate": "2026-01-14",
       "color": "#dc2626",
-      "customDates": {
-        "halbzeit": "2026-08-25"
-      },
+      "customDates": {},
       "status": {
         "halbzeit": "geplant",
         "review": "geplant",
@@ -116,9 +111,6 @@ const SAVED_STATE = {
     "2026-11-02",
     "2026-11-03",
     "2026-11-04",
-    "2026-09-07",
-    "2026-09-08",
-    "2026-09-17",
     "2026-11-13"
   ],
   "hiddenProducts": []
@@ -357,7 +349,59 @@ function App() {
     return ()=>window.removeEventListener('beforeunload', handler);
   },[isDirty]);
 
-  // ── Save to file ─────────────────────────────────────────────────
+  // ── Google Drive Sync ────────────────────────────────────────────
+  const LS_DRIVE_KEY = 'mandatierungskalender_drive_url';
+  const [driveUrl,    setDriveUrl]    = useState(()=>localStorage.getItem(LS_DRIVE_KEY)||"");
+  const [driveStatus, setDriveStatus] = useState("idle"); // idle|syncing|synced|error
+  const [showDriveSetup, setShowDriveSetup] = useState(false);
+  const [driveUrlInput, setDriveUrlInput]   = useState("");
+
+  // Load from Drive on startup
+  useEffect(()=>{
+    if(!driveUrl) return;
+    setDriveStatus("syncing");
+    fetch(driveUrl)
+      .then(r=>r.json())
+      .then(data=>{
+        if(data && data.products) {
+          setProducts(data.products);
+          if(data.blockers)      setBlockers(new Set(data.blockers));
+          if(data.hiddenProducts) setHiddenProducts(new Set(data.hiddenProducts));
+          setSavedSnapshot(JSON.stringify({ products:data.products, blockers:data.blockers||[], hiddenProducts:data.hiddenProducts||[] }));
+        }
+        setDriveStatus("synced");
+      })
+      .catch(()=>setDriveStatus("error"));
+  // eslint-disable-next-line
+  },[driveUrl]);
+
+  async function syncToDrive(state) {
+    if(!driveUrl) return;
+    setDriveStatus("syncing");
+    try {
+      await fetch(driveUrl, { method:"POST", mode:"no-cors", body:JSON.stringify(state) });
+      setDriveStatus("synced");
+    } catch(e) {
+      setDriveStatus("error");
+    }
+  }
+
+  function saveDriveUrl() {
+    const url = driveUrlInput.trim();
+    localStorage.setItem(LS_DRIVE_KEY, url);
+    setDriveUrl(url);
+    setShowDriveSetup(false);
+    setDriveStatus("idle");
+  }
+
+  function disconnectDrive() {
+    localStorage.removeItem(LS_DRIVE_KEY);
+    setDriveUrl("");
+    setDriveStatus("idle");
+    setShowDriveSetup(false);
+  }
+
+
   function saveToFile() {
     const state = { products, blockers:Array.from(blockers), hiddenProducts:Array.from(hiddenProducts) };
     const stateJson = JSON.stringify(state, null, 2);
@@ -379,6 +423,7 @@ function App() {
     a.href=url; a.download="Mandatierungskalender.html";
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
     setSavedSnapshot(JSON.stringify(state));
+    syncToDrive(state);
   }
 
   function doDelete() {
@@ -569,11 +614,55 @@ function App() {
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {/* Drive sync button */}
+          <button onClick={()=>{ setDriveUrlInput(driveUrl); setShowDriveSetup(true); }}
+            title={driveUrl?"Google Drive verbunden – klicken zum Verwalten":"Google Drive verbinden"}
+            style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:7,border:"2px solid",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"'Inter',sans-serif",transition:"all .2s",
+              borderColor: driveStatus==="error"?"#ef4444": driveStatus==="syncing"?"#f97316": driveUrl?"#0891b2":"#e2e8f0",
+              background:  driveStatus==="error"?"#fef2f2": driveStatus==="syncing"?"#fff7ed": driveUrl?"#f0f9ff":"white",
+              color:       driveStatus==="error"?"#dc2626": driveStatus==="syncing"?"#ea580c": driveUrl?"#0891b2":"#94a3b8"}}>
+            {driveStatus==="syncing"?"⏳":driveUrl?"☁":"☁"}
+            {driveStatus==="error"?" Fehler": driveStatus==="syncing"?" Sync…": driveUrl?" Drive":"+Drive"}
+          </button>
           <button onClick={saveToFile} style={{display:"flex",alignItems:"center",gap:6,background:isDirty?"#f0fdf4":"white",border:isDirty?"2px solid #22c55e":"2px solid #d1fae5",color:isDirty?"#16a34a":"#86efac",padding:"7px 14px",borderRadius:7,cursor:"pointer",fontSize:12,fontFamily:"'Inter',sans-serif",fontWeight:700,transition:"all .3s"}}>
             {isDirty ? "💾 Speichern*" : "✓ Gespeichert"}
           </button>
           <button className="add-btn" onClick={()=>{setEditId(null);setForm({name:"",mandDate:"",color:PRODUCT_COLORS[products.length%PRODUCT_COLORS.length]});setShowForm(true);}}>+ Produkt hinzufügen</button>
         </div>
+
+        {/* Drive Setup Modal */}
+        {showDriveSetup&&(
+          <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setShowDriveSetup(false)}>
+            <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:12,padding:28,width:480,boxShadow:"0 20px 60px rgba(0,0,0,.2)"}} onClick={e=>e.stopPropagation()}>
+              <div style={{fontSize:16,fontWeight:700,color:"#0f172a",marginBottom:6}}>☁ Google Drive verbinden</div>
+              <div style={{fontSize:12,color:"#64748b",marginBottom:18,lineHeight:1.6}}>
+                Daten werden automatisch in deinem Google Drive gespeichert und beim Öffnen geladen – von jedem Gerät.
+              </div>
+              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:11,color:"#475569",lineHeight:1.7}}>
+                <strong>Einrichtung (einmalig, ~5 Min.):</strong><br/>
+                1. <a href="https://script.google.com" target="_blank" rel="noreferrer" style={{color:"#0891b2"}}>script.google.com</a> öffnen → <strong>Neues Projekt</strong><br/>
+                2. Inhalt ersetzen mit dem Apps Script (separat bereitgestellt)<br/>
+                3. <strong>Bereitstellen → Neue Bereitstellung</strong> → Typ: <em>Web-App</em><br/>
+                4. Ausführen als: <em>Ich</em> · Zugriff: <em>Jeder</em> → Bereitstellen<br/>
+                5. Die angezeigte <strong>Web-App-URL</strong> hier einfügen:
+              </div>
+              <input
+                value={driveUrlInput}
+                onChange={e=>setDriveUrlInput(e.target.value)}
+                placeholder="https://script.google.com/macros/s/…/exec"
+                style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:7,fontSize:12,fontFamily:"'Inter',sans-serif",color:"#0f172a",outline:"none",marginBottom:14}}
+              />
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                {driveUrl&&<button onClick={disconnectDrive} style={{padding:"8px 14px",borderRadius:7,border:"1.5px solid #fecaca",background:"#fef2f2",color:"#dc2626",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Trennen</button>}
+                <button onClick={()=>setShowDriveSetup(false)} style={{padding:"8px 14px",borderRadius:7,border:"1.5px solid #e2e8f0",background:"white",color:"#64748b",fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Abbrechen</button>
+                <button onClick={saveDriveUrl} disabled={!driveUrlInput.trim().startsWith("http")}
+                  style={{padding:"8px 16px",borderRadius:7,border:"none",background:driveUrlInput.trim().startsWith("http")?"#0891b2":"#e2e8f0",color:"white",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                  Verbinden
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* TABS */}
@@ -1203,9 +1292,6 @@ function App() {
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<Root />);
 
-  
-  
-  
   
   </script>
 </body>

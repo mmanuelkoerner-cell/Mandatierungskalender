@@ -264,6 +264,7 @@ function App() {
   const [binStatus, setBinStatus] = useState("idle"); // idle|syncing|synced|error
   const [showBinSetup, setShowBinSetup] = useState(false);
   const [binKeyInput, setBinKeyInput]   = useState("");
+  const [binIdInput,  setBinIdInput]    = useState("");
   const [testResult,  setTestResult]    = useState("");
   const isConnected = !!(binKey && binId);
 
@@ -302,11 +303,44 @@ function App() {
     }
   }
 
-  // Connect: create a new bin with current data, store key + bin id
+  // Connect: either join existing bin (Bin-ID given) or create a new one
   async function connectBin() {
     const key = binKeyInput.trim();
+    const existingId = binIdInput.trim();
     if(!key) { setTestResult("✗ Bitte X-Master-Key eingeben."); return; }
-    setTestResult("⏳ Verbinde mit JSONBin…");
+
+    // ── Case A: Bin-ID given → join existing bin ──
+    if(existingId) {
+      setTestResult("⏳ Verbinde mit vorhandenem Bin…");
+      try {
+        const resp = await fetch(`https://api.jsonbin.io/v3/b/${existingId}/latest`, {
+          headers:{ "X-Master-Key": key }
+        });
+        if(!resp.ok) { setTestResult(`✗ Fehler ${resp.status}: Bin-ID oder Key falsch.`); return; }
+        const res = await resp.json();
+        const data = res.record;
+        localStorage.setItem(LS_BIN_KEY, key);
+        localStorage.setItem(LS_BIN_ID, existingId);
+        setBinKey(key); setBinId(existingId);
+        if(data && data.products) {
+          setProducts(data.products);
+          if(data.blockers)       setBlockers(new Set(data.blockers));
+          if(data.hiddenProducts) setHiddenProducts(new Set(data.hiddenProducts));
+          setSavedSnapshot(JSON.stringify({ products:data.products, blockers:data.blockers||[], hiddenProducts:data.hiddenProducts||[] }));
+          setTestResult(`✓ Verbunden! ${data.products.length} Produkte geladen.`);
+        } else {
+          setTestResult("✓ Verbunden! (Bin war noch leer)");
+        }
+        setBinStatus("synced");
+        setTimeout(()=>setShowBinSetup(false), 1200);
+      } catch(e) {
+        setTestResult("✗ Fehler: " + e.message);
+      }
+      return;
+    }
+
+    // ── Case B: no Bin-ID → create a new bin ──
+    setTestResult("⏳ Erstelle neuen Bin…");
     try {
       const state = { products, blockers:Array.from(blockers), hiddenProducts:Array.from(hiddenProducts) };
       const resp = await fetch("https://api.jsonbin.io/v3/b", {
@@ -319,9 +353,8 @@ function App() {
         localStorage.setItem(LS_BIN_KEY, key);
         localStorage.setItem(LS_BIN_ID, res.metadata.id);
         setBinKey(key); setBinId(res.metadata.id);
-        setTestResult(`✓ Verbunden! Daten werden ab jetzt automatisch synchronisiert.`);
+        setTestResult(`✓ Neuer Bin erstellt! Bin-ID: ${res.metadata.id} — diese ID für weitere Geräte nutzen.`);
         setBinStatus("synced");
-        setTimeout(()=>setShowBinSetup(false), 1200);
       } else {
         setTestResult("✗ Fehler: " + (res.message || "Unerwartete Antwort. Prüfe den Key."));
       }
@@ -556,7 +589,7 @@ function App() {
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           {/* Cloud sync button */}
-          <button onClick={()=>{ setBinKeyInput(binKey); setTestResult(""); setShowBinSetup(true); }}
+          <button onClick={()=>{ setBinKeyInput(binKey); setBinIdInput(""); setTestResult(""); setShowBinSetup(true); }}
             title={isConnected?"Cloud-Sync aktiv – klicken zum Verwalten":"Cloud-Sync einrichten"}
             style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:7,border:"2px solid",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"'Inter',sans-serif",transition:"all .2s",
               borderColor: binStatus==="error"?"#ef4444": binStatus==="syncing"?"#f97316": isConnected?"#0891b2":"#e2e8f0",
@@ -587,26 +620,44 @@ function App() {
               </div>
               {!isConnected&&(
                 <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:11,color:"#475569",lineHeight:1.8}}>
-                  <strong>Einrichtung (einmalig, ~2 Min.):</strong><br/>
-                  1. <a href="https://jsonbin.io" target="_blank" rel="noreferrer" style={{color:"#0891b2"}}>jsonbin.io</a> öffnen → kostenlos registrieren<br/>
-                  2. Oben rechts auf den Account → <strong>API Keys</strong><br/>
-                  3. Den <strong>X-MASTER-KEY</strong> kopieren<br/>
-                  4. Hier einfügen → <strong>Verbinden</strong>:
+                  <strong>Erstes Gerät (Ersteinrichtung):</strong><br/>
+                  1. <a href="https://jsonbin.io" target="_blank" rel="noreferrer" style={{color:"#0891b2"}}>jsonbin.io</a> → kostenlos registrieren → <strong>API Keys</strong> → <strong>X-MASTER-KEY</strong> kopieren<br/>
+                  2. Key unten einfügen, <strong>Bin-ID leer lassen</strong> → Verbinden<br/>
+                  3. Die danach angezeigte <strong>Bin-ID</strong> notieren<br/>
+                  <br/>
+                  <strong>Weiteres Gerät:</strong><br/>
+                  Denselben Key <strong>und</strong> die Bin-ID vom ersten Gerät eintragen → Verbinden
                 </div>
               )}
               {isConnected&&(
-                <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:11,color:"#16a34a",lineHeight:1.6,fontFamily:"'JetBrains Mono',monospace"}}>
-                  ✓ Bin-ID: {binId}
+                <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:11,color:"#16a34a",lineHeight:1.7}}>
+                  <div style={{marginBottom:8}}>✓ Verbunden. Für weitere Geräte: denselben Key und diese Bin-ID eintragen.</div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <code style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,background:"white",padding:"4px 10px",borderRadius:5,border:"1px solid #bbf7d0",flex:1,wordBreak:"break-all"}}>{binId}</code>
+                    <button onClick={()=>{navigator.clipboard.writeText(binId); setTestResult("✓ Bin-ID kopiert.");}}
+                      style={{padding:"5px 10px",borderRadius:5,border:"1px solid #bbf7d0",background:"white",color:"#16a34a",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",flexShrink:0}}>
+                      📋 Kopieren
+                    </button>
+                  </div>
                 </div>
               )}
               {!isConnected&&(
-                <input
-                  type="password"
-                  value={binKeyInput}
-                  onChange={e=>setBinKeyInput(e.target.value)}
-                  placeholder="X-Master-Key einfügen ($2a$10$…)"
-                  style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:7,fontSize:12,fontFamily:"'Inter',sans-serif",color:"#0f172a",outline:"none",marginBottom:12}}
-                />
+                <>
+                  <input
+                    type="password"
+                    value={binKeyInput}
+                    onChange={e=>setBinKeyInput(e.target.value)}
+                    placeholder="X-Master-Key ($2a$10$…)"
+                    style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:7,fontSize:12,fontFamily:"'Inter',sans-serif",color:"#0f172a",outline:"none",marginBottom:10}}
+                  />
+                  <input
+                    type="text"
+                    value={binIdInput}
+                    onChange={e=>setBinIdInput(e.target.value)}
+                    placeholder="Bin-ID (nur bei weiteren Geräten — sonst leer lassen)"
+                    style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:7,fontSize:12,fontFamily:"'Inter',sans-serif",color:"#0f172a",outline:"none",marginBottom:12}}
+                  />
+                </>
               )}
               {testResult&&(
                 <div style={{padding:"10px 12px",borderRadius:7,marginBottom:14,fontSize:11,lineHeight:1.5,fontFamily:"'Inter',sans-serif",

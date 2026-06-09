@@ -12,121 +12,15 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-
-
-
-
     const { useState, useMemo, useRef, useEffect } = React;
     const LS_KEY = 'mandatierungskalender_state';
     // @@SAVED_STATE_START@@
-const SAVED_STATE = {
-  "products": [
-    {
-      "id": 2,
-      "name": "Dachmarke",
-      "mandDate": "2026-04-29",
-      "customDates": {
-        "halbzeit": "2026-12-09"
-      },
-      "status": {
-        "halbzeit": "angemeldet",
-        "review": "geplant",
-        "vorbFrist": "angemeldet",
-        "vorb": "angemeldet",
-        "mandFrist": "angemeldet",
-        "mand": "angemeldet"
-      },
-      "color": "#0891b2"
-    },
-    {
-      "id": 3,
-      "name": "DRI",
-      "mandDate": "2026-11-11",
-      "customDates": {
-        "halbzeit": "2026-06-01",
-        "mand": "2026-11-25",
-        "mandFrist": "2026-11-20",
-        "vorb": "2026-11-17",
-        "vorbFrist": "2026-11-13",
-        "review": "2026-11-09"
-      },
-      "status": {
-        "halbzeit": "angemeldet",
-        "review": "geplant",
-        "vorbFrist": "geplant",
-        "vorb": "geplant",
-        "mandFrist": "geplant",
-        "mand": "geplant"
-      },
-      "color": "#db2777"
-    },
-    {
-      "id": 4,
-      "name": "Crime",
-      "mandDate": "2026-01-14",
-      "color": "#dc2626",
-      "customDates": {
-        "halbzeit": "2026-08-25"
-      },
-      "status": {
-        "halbzeit": "geplant",
-        "review": "geplant",
-        "vorbFrist": "geplant",
-        "vorb": "geplant",
-        "mandFrist": "geplant",
-        "mand": "geplant"
-      }
-    }
-  ],
-  "blockers": [
-    "2026-03-30",
-    "2026-03-31",
-    "2026-04-01",
-    "2026-04-02",
-    "2026-04-03",
-    "2026-04-04",
-    "2026-04-05",
-    "2026-04-23",
-    "2026-04-24",
-    "2026-07-04",
-    "2026-07-05",
-    "2026-07-06",
-    "2026-07-07",
-    "2026-07-08",
-    "2026-07-09",
-    "2026-07-10",
-    "2026-07-11",
-    "2026-07-12",
-    "2026-07-13",
-    "2026-07-14",
-    "2026-07-15",
-    "2026-07-16",
-    "2026-07-17",
-    "2026-07-18",
-    "2026-07-19",
-    "2026-10-21",
-    "2026-10-22",
-    "2026-10-23",
-    "2026-10-20",
-    "2026-10-26",
-    "2026-10-27",
-    "2026-10-28",
-    "2026-10-29",
-    "2026-10-30",
-    "2026-11-02",
-    "2026-11-03",
-    "2026-11-04",
-    "2026-09-07",
-    "2026-09-08",
-    "2026-09-17",
-    "2026-11-13"
-  ],
-  "hiddenProducts": []
-};
+const SAVED_STATE = null;
 // @@SAVED_STATE_END@@
     const _ls = (()=>{ try { const v=localStorage.getItem(LS_KEY); return v?JSON.parse(v):null; } catch(e){return null;} })();
     const _src = SAVED_STATE || _ls;
 
+const APP_VERSION = "v1.6";
 const MONTHS_FULL = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 const DAYS_DE = ["So","Mo","Di","Mi","Do","Fr","Sa"];
 
@@ -350,6 +244,11 @@ function App() {
     products:INITIAL_PRODUCTS, blockers:[], hiddenProducts:[]
   }));
   const isDirty = JSON.stringify({ products, blockers:Array.from(blockers), hiddenProducts:Array.from(hiddenProducts) }) !== savedSnapshot;
+  const LS_DL_KEY = 'mandatierungskalender_download_on_save';
+  const [downloadOnSave, setDownloadOnSave] = useState(()=>localStorage.getItem(LS_DL_KEY)==="1");
+  function toggleDownloadOnSave() {
+    setDownloadOnSave(v=>{ const n=!v; localStorage.setItem(LS_DL_KEY, n?"1":"0"); return n; });
+  }
 
   useEffect(()=>{
     const handler=(e)=>{ if(isDirty){ e.preventDefault(); e.returnValue=''; } };
@@ -357,9 +256,97 @@ function App() {
     return ()=>window.removeEventListener('beforeunload', handler);
   },[isDirty]);
 
-  // ── Save to file ─────────────────────────────────────────────────
+  // ── JSONBin.io Sync ──────────────────────────────────────────────
+  const LS_BIN_KEY = 'mandatierungskalender_jsonbin_key';
+  const LS_BIN_ID  = 'mandatierungskalender_jsonbin_id';
+  const [binKey,    setBinKey]    = useState(()=>localStorage.getItem(LS_BIN_KEY)||"");
+  const [binId,     setBinId]     = useState(()=>localStorage.getItem(LS_BIN_ID)||"");
+  const [binStatus, setBinStatus] = useState("idle"); // idle|syncing|synced|error
+  const [showBinSetup, setShowBinSetup] = useState(false);
+  const [binKeyInput, setBinKeyInput]   = useState("");
+  const [testResult,  setTestResult]    = useState("");
+  const isConnected = !!(binKey && binId);
+
+  // Load from JSONBin on startup
+  useEffect(()=>{
+    if(!binKey || !binId) return;
+    setBinStatus("syncing");
+    fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, { headers:{ "X-Master-Key": binKey } })
+      .then(r=>r.json())
+      .then(res=>{
+        const data = res.record;
+        if(data && data.products) {
+          setProducts(data.products);
+          if(data.blockers)       setBlockers(new Set(data.blockers));
+          if(data.hiddenProducts) setHiddenProducts(new Set(data.hiddenProducts));
+          setSavedSnapshot(JSON.stringify({ products:data.products, blockers:data.blockers||[], hiddenProducts:data.hiddenProducts||[] }));
+        }
+        setBinStatus("synced");
+      })
+      .catch(()=>setBinStatus("error"));
+  // eslint-disable-next-line
+  },[binKey, binId]);
+
+  async function syncToBin(state) {
+    if(!binKey || !binId) return;
+    setBinStatus("syncing");
+    try {
+      await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
+        method:"PUT",
+        headers:{ "Content-Type":"application/json", "X-Master-Key": binKey },
+        body: JSON.stringify(state)
+      });
+      setBinStatus("synced");
+    } catch(e) {
+      setBinStatus("error");
+    }
+  }
+
+  // Connect: create a new bin with current data, store key + bin id
+  async function connectBin() {
+    const key = binKeyInput.trim();
+    if(!key) { setTestResult("✗ Bitte X-Master-Key eingeben."); return; }
+    setTestResult("⏳ Verbinde mit JSONBin…");
+    try {
+      const state = { products, blockers:Array.from(blockers), hiddenProducts:Array.from(hiddenProducts) };
+      const resp = await fetch("https://api.jsonbin.io/v3/b", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", "X-Master-Key": key, "X-Bin-Name":"Mandatierungskalender", "X-Bin-Private":"true" },
+        body: JSON.stringify(state)
+      });
+      const res = await resp.json();
+      if(res.metadata && res.metadata.id) {
+        localStorage.setItem(LS_BIN_KEY, key);
+        localStorage.setItem(LS_BIN_ID, res.metadata.id);
+        setBinKey(key); setBinId(res.metadata.id);
+        setTestResult(`✓ Verbunden! Daten werden ab jetzt automatisch synchronisiert.`);
+        setBinStatus("synced");
+        setTimeout(()=>setShowBinSetup(false), 1200);
+      } else {
+        setTestResult("✗ Fehler: " + (res.message || "Unerwartete Antwort. Prüfe den Key."));
+      }
+    } catch(e) {
+      setTestResult("✗ Fehler: " + e.message);
+    }
+  }
+
+  function disconnectBin() {
+    localStorage.removeItem(LS_BIN_KEY);
+    localStorage.removeItem(LS_BIN_ID);
+    setBinKey(""); setBinId("");
+    setBinStatus("idle");
+    setTestResult("");
+    setShowBinSetup(false);
+  }
+
+
   function saveToFile() {
     const state = { products, blockers:Array.from(blockers), hiddenProducts:Array.from(hiddenProducts) };
+    // Always: update snapshot + sync to cloud
+    setSavedSnapshot(JSON.stringify(state));
+    syncToBin(state);
+    // Optional: download HTML file
+    if(!downloadOnSave) return;
     const stateJson = JSON.stringify(state, null, 2);
     const newBlock = "// @@SAVED_STATE_START@@\nconst SAVED_STATE = " + stateJson + ";\n// @@SAVED_STATE_END@@";
     const babelEl = document.querySelector('script[type="text/babel"]');
@@ -378,7 +365,6 @@ function App() {
     const a = document.createElement("a");
     a.href=url; a.download="Mandatierungskalender.html";
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    setSavedSnapshot(JSON.stringify(state));
   }
 
   function doDelete() {
@@ -565,15 +551,84 @@ function App() {
           <div style={{width:38,height:38,borderRadius:10,background:"linear-gradient(135deg,#3b82f6,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,boxShadow:"0 2px 8px rgba(99,102,241,.35)"}}>📋</div>
           <div>
             <div style={{fontWeight:700,fontSize:17,letterSpacing:"-.4px",color:"#0f172a"}}>Mandatierungskalender <span style={{color:"#3b82f6"}}>{calYear}</span></div>
-            <div style={{fontSize:11,color:"#94a3b8",marginTop:1}}>Portfoliomanagement · Partnerübersicht</div>
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:1}}>Portfoliomanagement · Partnerübersicht <span style={{color:"#cbd5e1",fontFamily:"'JetBrains Mono',monospace",marginLeft:4}}>{APP_VERSION}</span></div>
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {/* Cloud sync button */}
+          <button onClick={()=>{ setBinKeyInput(binKey); setTestResult(""); setShowBinSetup(true); }}
+            title={isConnected?"Cloud-Sync aktiv – klicken zum Verwalten":"Cloud-Sync einrichten"}
+            style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:7,border:"2px solid",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"'Inter',sans-serif",transition:"all .2s",
+              borderColor: binStatus==="error"?"#ef4444": binStatus==="syncing"?"#f97316": isConnected?"#0891b2":"#e2e8f0",
+              background:  binStatus==="error"?"#fef2f2": binStatus==="syncing"?"#fff7ed": isConnected?"#f0f9ff":"white",
+              color:       binStatus==="error"?"#dc2626": binStatus==="syncing"?"#ea580c": isConnected?"#0891b2":"#94a3b8"}}>
+            {binStatus==="syncing"?"⏳":"☁"}
+            {binStatus==="error"?" Fehler": binStatus==="syncing"?" Sync…": isConnected?" Cloud":"+Cloud"}
+          </button>
           <button onClick={saveToFile} style={{display:"flex",alignItems:"center",gap:6,background:isDirty?"#f0fdf4":"white",border:isDirty?"2px solid #22c55e":"2px solid #d1fae5",color:isDirty?"#16a34a":"#86efac",padding:"7px 14px",borderRadius:7,cursor:"pointer",fontSize:12,fontFamily:"'Inter',sans-serif",fontWeight:700,transition:"all .3s"}}>
             {isDirty ? "💾 Speichern*" : "✓ Gespeichert"}
           </button>
+          <label title="Beim Speichern zusätzlich eine HTML-Datei herunterladen" style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",fontSize:11,color:downloadOnSave?"#16a34a":"#94a3b8",fontFamily:"'Inter',sans-serif",userSelect:"none",fontWeight:downloadOnSave?600:400}}>
+            <input type="checkbox" checked={downloadOnSave} onChange={toggleDownloadOnSave} style={{cursor:"pointer",accentColor:"#16a34a"}} />
+            ⬇ Datei
+          </label>
           <button className="add-btn" onClick={()=>{setEditId(null);setForm({name:"",mandDate:"",color:PRODUCT_COLORS[products.length%PRODUCT_COLORS.length]});setShowForm(true);}}>+ Produkt hinzufügen</button>
         </div>
+
+        {/* Cloud Setup Modal */}
+        {showBinSetup&&(
+          <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setShowBinSetup(false)}>
+            <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:12,padding:28,width:500,boxShadow:"0 20px 60px rgba(0,0,0,.2)"}} onClick={e=>e.stopPropagation()}>
+              <div style={{fontSize:16,fontWeight:700,color:"#0f172a",marginBottom:6}}>☁ Cloud-Sync (JSONBin.io)</div>
+              <div style={{fontSize:12,color:"#64748b",marginBottom:18,lineHeight:1.6}}>
+                {isConnected
+                  ? "Verbunden. Daten werden bei jedem Speichern automatisch synchronisiert und beim Öffnen geladen – von jedem Gerät."
+                  : "Daten werden automatisch in der Cloud gespeichert und auf jedem Gerät geladen. Kostenlos, kein Google nötig."}
+              </div>
+              {!isConnected&&(
+                <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:11,color:"#475569",lineHeight:1.8}}>
+                  <strong>Einrichtung (einmalig, ~2 Min.):</strong><br/>
+                  1. <a href="https://jsonbin.io" target="_blank" rel="noreferrer" style={{color:"#0891b2"}}>jsonbin.io</a> öffnen → kostenlos registrieren<br/>
+                  2. Oben rechts auf den Account → <strong>API Keys</strong><br/>
+                  3. Den <strong>X-MASTER-KEY</strong> kopieren<br/>
+                  4. Hier einfügen → <strong>Verbinden</strong>:
+                </div>
+              )}
+              {isConnected&&(
+                <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:11,color:"#16a34a",lineHeight:1.6,fontFamily:"'JetBrains Mono',monospace"}}>
+                  ✓ Bin-ID: {binId}
+                </div>
+              )}
+              {!isConnected&&(
+                <input
+                  type="password"
+                  value={binKeyInput}
+                  onChange={e=>setBinKeyInput(e.target.value)}
+                  placeholder="X-Master-Key einfügen ($2a$10$…)"
+                  style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:7,fontSize:12,fontFamily:"'Inter',sans-serif",color:"#0f172a",outline:"none",marginBottom:12}}
+                />
+              )}
+              {testResult&&(
+                <div style={{padding:"10px 12px",borderRadius:7,marginBottom:14,fontSize:11,lineHeight:1.5,fontFamily:"'Inter',sans-serif",
+                  background: testResult.startsWith("✓")?"#f0fdf4": testResult.startsWith("✗")?"#fef2f2": testResult.startsWith("⏳")?"#f8fafc":"#fffbeb",
+                  color:      testResult.startsWith("✓")?"#16a34a": testResult.startsWith("✗")?"#dc2626": testResult.startsWith("⏳")?"#64748b":"#d97706",
+                  border:`1px solid ${testResult.startsWith("✓")?"#bbf7d0": testResult.startsWith("✗")?"#fecaca":"#fde68a"}`}}>
+                  {testResult}
+                </div>
+              )}
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                {isConnected&&<button onClick={disconnectBin} style={{padding:"8px 14px",borderRadius:7,border:"1.5px solid #fecaca",background:"#fef2f2",color:"#dc2626",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Trennen</button>}
+                <button onClick={()=>setShowBinSetup(false)} style={{padding:"8px 14px",borderRadius:7,border:"1.5px solid #e2e8f0",background:"white",color:"#64748b",fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Schließen</button>
+                {!isConnected&&(
+                  <button onClick={connectBin} disabled={!binKeyInput.trim()}
+                    style={{padding:"8px 16px",borderRadius:7,border:"none",background:binKeyInput.trim()?"#0891b2":"#e2e8f0",color:"white",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                    Verbinden
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* TABS */}
@@ -1182,6 +1237,7 @@ function App() {
               <div style={{fontSize:36,marginBottom:12}}>📋</div>
               <div style={{fontSize:20,fontWeight:800,color:"#F1F5F9",marginBottom:6}}>Mandatierungskalender</div>
               <div style={{fontSize:13,color:"#64748B"}}>Portfoliomanagement · Partnerübersicht</div>
+              <div style={{fontSize:11,color:"#475569",marginTop:6,fontFamily:"'JetBrains Mono',monospace"}}>v1.6</div>
             </div>
             <div style={{marginBottom:16}}>
               <label style={{fontSize:11,fontWeight:600,color:"#64748B",display:"block",marginBottom:8,textTransform:"uppercase",letterSpacing:".06em"}}>Passwort</label>
@@ -1203,10 +1259,6 @@ function App() {
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<Root />);
 
-  
-  
-  
-  
   </script>
 </body>
 </html>

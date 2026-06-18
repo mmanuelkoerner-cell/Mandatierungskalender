@@ -4,14 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mandatierungskalender</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>body{margin:0;padding:0}</style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel">
+  <div id="root" style="font-family:sans-serif;color:#94a3b8;padding:40px;text-align:center">Lädt…</div>
+  <script type="text/babel" id="app-code">
     const { useState, useMemo, useRef, useEffect } = React;
     const LS_KEY = 'mandatierungskalender_state';
     // @@SAVED_STATE_START@@
@@ -385,14 +382,17 @@ function App() {
     const babelEl = document.querySelector('script[type="text/babel"]');
     const originalSource = babelEl.textContent;
     const newSource = originalSource.replace(/\/\/ @@SAVED_STATE_START@@[\s\S]*?\/\/ @@SAVED_STATE_END@@/, newBlock);
+    // Reconstruct full page including the existing CDN-fallback loader
+    const loaderEl = document.getElementById('cdn-loader');
+    const loaderSource = loaderEl ? loaderEl.textContent : '';
     const newHtml = ['<!DOCTYPE html>','<html lang="de">','<head>',
       '  <meta charset="UTF-8" />','  <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
       '  <title>Mandatierungskalender</title>',
-      '  <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>',
-      '  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>',
-      '  <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>',
-      '  <style>body{margin:0;padding:0}<\/style>','</head>','<body>','  <div id="root"></div>',
-      '  <script type="text/babel">',newSource,'  <\/script>','</body>','</html>'].join('\n');
+      '  <style>body{margin:0;padding:0}<\/style>','</head>','<body>',
+      '  <div id="root" style="font-family:sans-serif;color:#94a3b8;padding:40px;text-align:center">Lädt…</div>',
+      '  <script type="text/babel" id="app-code">',newSource,'  <\/script>',
+      '  <script id="cdn-loader">',loaderSource,'  <\/script>',
+      '</body>','</html>'].join('\n');
     const blob = new Blob([newHtml], {type:"text/html;charset=utf-8"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1309,6 +1309,61 @@ function App() {
     }
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<Root />);
+
+  </script>
+  <script id="cdn-loader">
+
+    (function(){
+      var CDNS = [
+        { name:"Cloudflare",
+          react:"https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js",
+          dom:"https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js",
+          babel:"https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js" },
+        { name:"jsDelivr",
+          react:"https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js",
+          dom:"https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js",
+          babel:"https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js" },
+        { name:"unpkg",
+          react:"https://unpkg.com/react@18/umd/react.production.min.js",
+          dom:"https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
+          babel:"https://unpkg.com/@babel/standalone/babel.min.js" }
+      ];
+      function loadScript(src){
+        return new Promise(function(resolve,reject){
+          var s=document.createElement('script');
+          s.src=src; s.onload=resolve;
+          s.onerror=function(){ reject(new Error('fail '+src)); };
+          document.head.appendChild(s);
+        });
+      }
+      function showError(msg){
+        var r=document.getElementById('root');
+        if(r) r.innerHTML='<div style="font-family:sans-serif;max-width:480px;margin:80px auto;padding:32px;border:1.5px solid #fecaca;background:#fef2f2;border-radius:12px;color:#b91c1c;line-height:1.6"><div style="font-size:18px;font-weight:700;margin-bottom:10px">⚠ Laden fehlgeschlagen</div><div style="font-size:14px;color:#7f1d1d">'+msg+'</div></div>';
+      }
+      async function boot(){
+        var loaded=false;
+        for(var i=0;i<CDNS.length;i++){
+          try{
+            await loadScript(CDNS[i].react);
+            await loadScript(CDNS[i].dom);
+            await loadScript(CDNS[i].babel);
+            if(window.React && window.ReactDOM && window.Babel){ loaded=true; break; }
+          }catch(e){ /* try next CDN */ }
+        }
+        if(!loaded){
+          showError('React/Babel konnten von keinem CDN geladen werden (Cloudflare, jsDelivr, unpkg). Pr&uuml;fe deine Internetverbindung oder ob das Firmennetzwerk diese Adressen blockiert.');
+          return;
+        }
+        try{
+          var code=document.getElementById('app-code').textContent;
+          var out=window.Babel.transform(code,{presets:[['react',{runtime:'classic'}]]}).code;
+          (0,eval)(out);
+        }catch(e){
+          showError('Fehler beim Ausf&uuml;hren: '+e.message);
+        }
+      }
+      boot();
+    })();
 
   </script>
 </body>
